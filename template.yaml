@@ -1,0 +1,179 @@
+apiVersion: zeabur.com/v1
+kind: Template
+metadata:
+  name: Flow2API
+spec:
+  description: OpenAI-compatible FastAPI service for Flow image and video generation, preconfigured for personal captcha mode.
+  tags:
+    - AI
+    - API
+    - Tool
+  readme: |-
+    # Flow2API on Zeabur
+
+    This template deploys the `mcn11415/Oh-My-Flow2` repository as a single Zeabur service.
+
+    ## What this template sets up
+
+    - Deploys the GitHub repository with the repository's headed Docker setup for browser-based captcha.
+    - Exposes the HTTP service on port `8000`.
+    - Persists `/app/data` and `/app/tmp` with Zeabur Volumes.
+    - Pre-creates `/app/config/setting.toml` using an 8GB-oriented personal captcha configuration.
+
+    ## Important notes
+
+    - The application reads its runtime configuration from `/app/config/setting.toml`.
+    - Zeabur Volumes make the service stateful. According to Zeabur's volume documentation, stateful services do not support zero-downtime restarts.
+    - This template uses the repository's headed runtime path for `personal` captcha mode and sets `personal_max_resident_tabs = 6`.
+    - Browser-based captcha on Zeabur depends on the platform tolerating Chromium runtime, headed/browser dependencies, and the configured shared memory size.
+
+    ## After deployment
+
+    1. Open the deployed service.
+    2. Review `/app/config/setting.toml` in Zeabur Config Editor.
+    3. Update the default API key and admin credentials before public use.
+    4. If you need persistent cache files, keep the `/app/tmp` volume mounted.
+    5. Add your real token data and replace the default admin credentials before exposing the service.
+  services:
+    - name: Flow2API
+      template: GIT
+      spec:
+        source:
+          source: GITHUB
+          repo: 1209930662
+          branch: main
+          dockerfile: |-
+            FROM python:3.11-slim
+
+            WORKDIR /app
+
+            ENV PYTHONDONTWRITEBYTECODE=1 \
+                PYTHONUNBUFFERED=1 \
+                ALLOW_DOCKER_HEADED_CAPTCHA=true \
+                PLAYWRIGHT_BROWSERS_PATH=0
+
+            COPY requirements.txt .
+            RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt \
+                && python -m playwright install --with-deps chromium
+
+            COPY . .
+
+            COPY docker/entrypoint.headed.sh /usr/local/bin/entrypoint.headed.sh
+            RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.headed.sh && chmod +x /usr/local/bin/entrypoint.headed.sh
+
+            EXPOSE 8000
+
+            CMD ["/usr/local/bin/entrypoint.headed.sh"]
+        ports:
+          - id: web
+            port: 8000
+            type: HTTP
+        env:
+          ALLOW_DOCKER_HEADED_CAPTCHA:
+            default: "true"
+        resources:
+          shmSize: 2Gi
+        volumes:
+          - id: data
+            dir: /app/data
+          - id: tmp
+            dir: /app/tmp
+        configs:
+          - path: /app/config/setting.toml
+            template: |-
+              [global]
+              api_key = "han1234"
+              admin_username = "admin"
+              admin_password = "admin"
+
+              [flow]
+              labs_base_url = "https://labs.google/fx/api"
+              api_base_url = "https://aisandbox-pa.googleapis.com/v1"
+              timeout = 120
+              max_retries = 3
+              image_request_timeout = 40
+              image_timeout_retry_count = 1
+              image_timeout_retry_delay = 0.8
+              image_timeout_use_media_proxy_fallback = true
+              image_prefer_media_proxy = false
+              image_slot_wait_timeout = 480
+              image_launch_soft_limit = 20
+              image_launch_wait_timeout = 480
+              image_launch_stagger_ms = 0
+              video_slot_wait_timeout = 480
+              video_launch_soft_limit = 20
+              video_launch_wait_timeout = 480
+              video_launch_stagger_ms = 0
+              poll_interval = 3.0
+              max_poll_attempts = 200
+
+              [server]
+              host = "0.0.0.0"
+              port = 8000
+
+              [debug]
+              enabled = false
+              log_requests = true
+              log_responses = true
+              mask_token = true
+
+              [proxy]
+              proxy_enabled = false
+              proxy_url = ""
+
+              [generation]
+              image_timeout = 300
+              video_timeout = 1500
+
+              [call_logic]
+              call_mode = "default"  # default=随机轮询策略, polling=顺序轮询策略
+
+              [admin]
+              error_ban_threshold = 3
+
+              [cache]
+              enabled = false
+              timeout = 7200  # 缓存超时时间(秒), 默认2小时; 设置为0表示不自动删除缓存
+              base_url = ""   # 缓存文件访问的基础URL, 留空则使用服务器地址
+
+              [captcha]
+              captcha_method = "personal"  # 打码方式: yescaptcha/browser/personal/remote_browser
+              browser_recaptcha_settle_seconds = 3.0  # reload/clr 就绪后的额外稳态等待
+              browser_count = 1  # browser 模式的有头浏览器实例数量
+              personal_project_pool_size = 4  # 8GB 推荐从 4 个项目池起步
+              personal_max_resident_tabs = 6  # 8GB 机器推荐先用 6 个常驻 tab，稳定后再逐步上调
+              personal_idle_tab_ttl_seconds = 900  # 常驻标签页空闲 15 分钟回收，兼顾性能与内存
+              yescaptcha_api_key = ""  # YesCaptcha API密钥
+              yescaptcha_base_url = "https://api.yescaptcha.com"
+              remote_browser_base_url = ""  # 远程有头打码服务地址
+              remote_browser_api_key = ""   # 远程有头打码服务 API Key
+              remote_browser_timeout = 60   # 远程有头打码请求超时(秒)
+localization:
+  zh-CN:
+    description: 为 Flow 提供 OpenAI 兼容接口的 FastAPI 服务，默认适配 personal 打码模式。
+    readme: |-
+      # 在 Zeabur 上部署 Flow2API
+
+      这个模板会把 `mcn11415/Oh-My-Flow2` 仓库部署为一个 Zeabur 服务。
+
+      ## 模板内容
+
+      - 使用仓库的 headed Docker 运行链路部署，适配 personal 浏览器打码。
+      - 暴露 `8000` HTTP 端口。
+      - 为 `/app/data` 和 `/app/tmp` 挂载 Zeabur Volumes。
+      - 预置 `/app/config/setting.toml`，内容为适合 8GB 机器的 personal 配置，常驻 tab 默认为 6。
+
+      ## 注意事项
+
+      - 应用从 `/app/config/setting.toml` 读取运行配置。
+      - 根据 Zeabur 文档，启用 Volume 后服务会变成有状态服务，不支持零停机重启。
+      - 本模板默认启用 `personal` 打码，并走仓库现成的 headed 运行链路。
+      - 浏览器打码能否在 Zeabur 稳定运行，仍取决于平台对 Chromium、共享内存与浏览器运行时的支持情况。
+
+      ## 部署后建议
+
+      1. 在 Zeabur 中打开服务。
+      2. 通过 Config Editor 检查 `/app/config/setting.toml`。
+      3. 上线前修改默认 API Key 和管理后台账号密码。
+      4. 如果你希望缓存文件在重启后保留，请保留 `/app/tmp` Volume。
+      5. 对外提供服务前，请替换默认后台账号密码并导入你自己的 token 数据。
