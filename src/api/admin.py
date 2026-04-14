@@ -186,6 +186,8 @@ def _build_browser_runtime_check(
             getattr(service, "_initialized", False)
             and getattr(service, "browser", None)
         )
+        usable = bool(service._is_personal_runtime_usable())
+        launchable = bool(service._is_browser_launchable_from_diagnostics())
         last_health_ok = bool(getattr(service, "_last_health_probe_ok", False))
         diagnostics = service.get_browser_startup_diagnostics()
         mode_details = {
@@ -193,6 +195,8 @@ def _build_browser_runtime_check(
             "required": True,
             "mode": "personal",
             "initialized": initialized,
+            "usable": usable,
+            "launchable": launchable,
             "resident_tab_count": len(resident_tabs),
             "resident_ready_count": resident_ready,
             "configured_max_tabs": getattr(service, "_max_resident_tabs", None),
@@ -208,18 +212,25 @@ def _build_browser_runtime_check(
             "probe_returncode": diagnostics.get("probe_returncode"),
             "tmp_dir_writable": diagnostics.get("tmp_dir_writable"),
         }
-        if initialized and resident_ready > 0:
+        if usable and resident_ready > 0:
             return _health_check(
                 "ok",
                 "Browser Runtime",
                 f"personal 浏览器已初始化，共 {resident_ready}/{len(resident_tabs)} 个常驻标签页可用",
                 mode_details,
             )
-        if initialized:
+        if initialized and launchable:
             return _health_check(
                 "warn",
                 "Browser Runtime",
-                "personal 浏览器已初始化，但当前没有可用的常驻打码标签页",
+                "Chromium 可启动且浏览器进程已连接，但当前没有可用的常驻打码标签页",
+                mode_details,
+            )
+        if launchable:
+            return _health_check(
+                "warn",
+                "Browser Runtime",
+                "Chromium 可启动，但 personal 模式尚未进入可用状态（resident tab 未就绪）",
                 mode_details,
             )
         return _health_check(

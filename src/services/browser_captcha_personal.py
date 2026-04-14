@@ -666,6 +666,7 @@ class BrowserCaptchaService:
         self._last_runtime_restart_at = 0.0
         self._proxy_url: Optional[str] = None
         self._proxy_ext_dir: Optional[str] = None
+        self._resident_runtime_ready = False
         self._diagnostics_lock = asyncio.Lock()
         self._browser_startup_diagnostics: Dict[str, Any] = {
             "available": False,
@@ -844,9 +845,55 @@ class BrowserCaptchaService:
     def _invalidate_browser_health(self):
         self._last_health_probe_at = 0.0
         self._last_health_probe_ok = False
+        self._invalidate_resident_runtime_ready()
 
     def _mark_runtime_restart(self):
         self._last_runtime_restart_at = time.time()
+
+    def _mark_resident_runtime_ready(self, ready: bool):
+        self._resident_runtime_ready = bool(ready)
+
+    def _invalidate_resident_runtime_ready(self):
+        self._mark_resident_runtime_ready(False)
+
+    def _is_personal_runtime_usable(self) -> bool:
+        if not (self._initialized and self.browser and self._resident_runtime_ready):
+            return False
+        return bool(
+            any(
+                getattr(item, "tab", None) and getattr(item, "recaptcha_ready", False)
+                for item in (self._resident_tabs or {}).values()
+            )
+        )
+
+    def _is_browser_launchable_from_diagnostics(self) -> bool:
+        diagnostics = self.get_browser_startup_diagnostics()
+        if not diagnostics:
+            return False
+        if (
+            diagnostics.get("browser_exists")
+            and diagnostics.get("browser_version_rc") == 0
+        ):
+            if diagnostics.get("probe_status") in {"ok", "timeout"}:
+                return True
+            if str(diagnostics.get("probe_stdout") or "").strip():
+                return True
+        return False
+
+    def _is_startup_retryable_error(self, error: BaseException) -> bool:
+        error_text = str(error or "").lower()
+        retry_keywords = [
+            "failed to connect to browser",
+            "connection refused",
+            "timeout",
+            "timed out",
+            "websocket",
+            "devtools",
+            "browser closed",
+            "target closed",
+            "connection reset",
+        ]
+        return any(keyword in error_text for keyword in retry_keywords)
 
     def get_browser_startup_diagnostics(self) -> Dict[str, Any]:
         return dict(self._browser_startup_diagnostics)
@@ -1650,6 +1697,7 @@ class BrowserCaptchaService:
         self._last_fingerprint = None
         self._last_fingerprint_at = 0.0
         self._mark_browser_health(False)
+        self._invalidate_resident_runtime_ready()
         self._cleanup_proxy_extension()
         self._proxy_url = None
 
@@ -1933,42 +1981,72 @@ class BrowserCaptchaService:
                 )
 
                 # 启动 nodriver 浏览器（后台启动，不占用前台）
-                try:
-                    self.browser = await self._run_with_timeout(
-                        uc.start(**launch_kwargs),
-                        timeout_seconds=30.0,
-                        label="nodriver.start",
-                    )
-                except Exception as start_error:
-                    error_text = str(start_error or "").lower()
-                    needs_explicit_no_sandbox = (
-                        "no_sandbox" in error_text or "root" in error_text
-                    )
-                    if not needs_explicit_no_sandbox:
-                        raise
+                self._invalidate_resident_runtime_ready()
+                startup_attempts = max(
+                    1,
+                    int(getattr(config, "browser_personal_startup_attempts", 3) or 3),
+                )
+                startup_delay_seconds = max(
+                    0.5,
+                    float(
+                        getattr(
+                            config,
+                            "browser_personal_startup_retry_delay_seconds",
+                            2.0,
+                        )
+                        or 2.0
+                    ),
+                )
+                launch_timeout_seconds = max(
+                    10.0,
+                    float(
+                        getattr(
+                            config, "browser_personal_startup_timeout_seconds", 45.0
+                        )
+                        or 45.0
+                    ),
+                )
+                last_start_error = None
 
-                    fallback_browser_args = list(browser_args)
-                    if "--no-sandbox" not in fallback_browser_args:
-                        fallback_browser_args.append("--no-sandbox")
+                for attempt_index in range(startup_attempts):
+                    try:
+                        if attempt_index > 0:
+                            delay_seconds = startup_delay_seconds * attempt_index
+                            debug_logger.log_warning(
+                                "[BrowserCaptcha] nodriver 启动重试中: "
+                                f"attempt={attempt_index + 1}/{startup_attempts}, wait={delay_seconds:.1f}s"
+                            )
+                            await asyncio.sleep(delay_seconds)
 
-                    fallback_kwargs = dict(launch_kwargs)
-                    fallback_kwargs["browser_args"] = fallback_browser_args
-                    fallback_kwargs["sandbox"] = False
-                    fallback_config = uc.Config(**fallback_kwargs)
-                    effective_launch_args = fallback_config()
-                    debug_logger.log_warning(
-                        "[BrowserCaptcha] nodriver 首次启动失败，使用显式 --no-sandbox 重试: "
-                        f"{type(start_error).__name__}: {start_error}"
-                    )
-                    self.browser = await self._run_with_timeout(
-                        uc.start(**fallback_kwargs),
-                        timeout_seconds=30.0,
-                        label="nodriver.start.retry_no_sandbox",
-                    )
+                        self.browser = await self._run_with_timeout(
+                            uc.start(**launch_kwargs),
+                            timeout_seconds=launch_timeout_seconds,
+                            label=f"nodriver.start.attempt_{attempt_index + 1}",
+                        )
+                        last_start_error = None
+                        break
+                    except Exception as start_error:
+                        last_start_error = start_error
+                        retryable = self._is_startup_retryable_error(start_error)
+                        debug_logger.log_warning(
+                            "[BrowserCaptcha] nodriver 启动失败: "
+                            f"attempt={attempt_index + 1}/{startup_attempts}, retryable={retryable}, "
+                            f"error={type(start_error).__name__}: {start_error}"
+                        )
+                        self.browser = None
+                        self._initialized = False
+                        self._mark_browser_health(False)
+                        self._invalidate_resident_runtime_ready()
+                        if attempt_index >= (startup_attempts - 1) or not retryable:
+                            raise
+
+                if last_start_error is not None:
+                    raise last_start_error
 
                 _patch_nodriver_runtime(self.browser)
                 self._initialized = True
                 self._mark_browser_health(True)
+                self._invalidate_resident_runtime_ready()
                 if self._idle_reaper_task is None or self._idle_reaper_task.done():
                     self._idle_reaper_task = asyncio.create_task(
                         self._idle_tab_reaper_loop()
@@ -2040,12 +2118,28 @@ class BrowserCaptchaService:
                 force_create=True,
                 return_slot_key=True,
             )
-            if resident_info and resident_info.tab and slot_id:
+            if (
+                resident_info
+                and resident_info.tab
+                and slot_id
+                and resident_info.recaptcha_ready
+            ):
                 if slot_id not in warmed_slots:
                     warmed_slots.append(slot_id)
                 continue
             debug_logger.log_warning(
                 f"[BrowserCaptcha] 预热共享标签页失败 (seed={warm_project_id})"
+            )
+
+        if warmed_slots:
+            self._mark_resident_runtime_ready(True)
+            debug_logger.log_info(
+                f"[BrowserCaptcha] 共享标签页预热完成，personal 运行态已可用 (slots={len(warmed_slots)})"
+            )
+        else:
+            self._invalidate_resident_runtime_ready()
+            debug_logger.log_warning(
+                "[BrowserCaptcha] 共享标签页预热未成功，personal 运行态保持不可用"
             )
 
         return warmed_slots
@@ -3326,6 +3420,7 @@ class BrowserCaptchaService:
             resident_info.recaptcha_ready = True
             resident_info.fingerprint = await self._refresh_last_fingerprint(tab)
             self._mark_browser_health(True)
+            self._mark_resident_runtime_ready(True)
 
             debug_logger.log_info(
                 f"[BrowserCaptcha] ✅ 共享常驻标签页创建成功 (slot={slot_id}, project={project_id})"
@@ -3333,6 +3428,7 @@ class BrowserCaptchaService:
             return resident_info
 
         except Exception as e:
+            self._invalidate_resident_runtime_ready()
             debug_logger.log_error(
                 f"[BrowserCaptcha] 创建共享常驻标签页异常 (slot={slot_id}, project={project_id}): {e}"
             )
