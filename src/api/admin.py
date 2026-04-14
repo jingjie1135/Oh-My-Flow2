@@ -1995,15 +1995,16 @@ async def update_debug_config(
 ):
     """Update debug configuration"""
     try:
-        # Update in-memory config only (not database)
-        # This ensures debug mode is automatically disabled on restart
-        config.set_debug_enabled(request.enabled)
+        await db.update_debug_config(enabled=request.enabled)
+        await db.reload_config_to_memory()
 
         status = "enabled" if request.enabled else "disabled"
         return {
             "success": True,
             "message": f"Debug mode {status}",
             "enabled": request.enabled,
+            "log_requests": bool(getattr(config, "debug_log_requests", False)),
+            "log_responses": bool(getattr(config, "debug_log_responses", False)),
         }
     except Exception as e:
         raise HTTPException(

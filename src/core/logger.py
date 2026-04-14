@@ -1,10 +1,12 @@
 """Debug logger module for detailed API request/response logging"""
+
 import json
 import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 from .config import config
+
 
 class DebugLogger:
     """Debug logger for API requests and responses"""
@@ -23,22 +25,21 @@ class DebugLogger:
         self.logger.handlers.clear()
 
         # Create file handler
-        file_handler = logging.FileHandler(
-            self.log_file,
-            mode='a',
-            encoding='utf-8'
-        )
+        file_handler = logging.FileHandler(self.log_file, mode="a", encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
 
         # Create formatter
-        formatter = logging.Formatter(
-            '%(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+        formatter = logging.Formatter("%(message)s", datefmt="%Y-%m-%d %H:%M:%S")
         file_handler.setFormatter(formatter)
+
+        # Create stdout handler so container runtime can also capture debug logs.
+        stream_handler = logging.StreamHandler()
+        stream_handler.setLevel(logging.DEBUG)
+        stream_handler.setFormatter(formatter)
 
         # Add handler
         self.logger.addHandler(file_handler)
+        self.logger.addHandler(stream_handler)
 
         # Prevent propagation to root logger
         self.logger.propagate = False
@@ -51,7 +52,7 @@ class DebugLogger:
 
     def _format_timestamp(self) -> str:
         """Format current timestamp"""
-        return datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
     def _write_separator(self, char: str = "=", length: int = 100):
         """Write separator line"""
@@ -59,11 +60,11 @@ class DebugLogger:
 
     def _truncate_large_fields(self, data: Any, max_length: int = 200) -> Any:
         """对大字段进行截断处理，特别是 base64 编码的图片数据
-        
+
         Args:
             data: 要处理的数据
             max_length: 字符串字段的最大长度
-        
+
         Returns:
             截断后的数据副本
         """
@@ -71,8 +72,14 @@ class DebugLogger:
             result = {}
             for key, value in data.items():
                 # 对特定的大字段进行截断
-                if key in ("encodedImage", "base64", "imageData", "data") and isinstance(value, str) and len(value) > max_length:
-                    result[key] = f"{value[:100]}... (truncated, total {len(value)} chars)"
+                if (
+                    key in ("encodedImage", "base64", "imageData", "data")
+                    and isinstance(value, str)
+                    and len(value) > max_length
+                ):
+                    result[key] = (
+                        f"{value[:100]}... (truncated, total {len(value)} chars)"
+                    )
                 else:
                     result[key] = self._truncate_large_fields(value, max_length)
             return result
@@ -90,7 +97,7 @@ class DebugLogger:
         headers: Dict[str, str],
         body: Optional[Any] = None,
         files: Optional[Dict] = None,
-        proxy: Optional[str] = None
+        proxy: Optional[str] = None,
     ):
         """Log API request details to log.txt"""
 
@@ -110,7 +117,11 @@ class DebugLogger:
             self.logger.info("\n📋 Headers:")
             masked_headers = dict(headers)
             if "Authorization" in masked_headers or "authorization" in masked_headers:
-                auth_key = "Authorization" if "Authorization" in masked_headers else "authorization"
+                auth_key = (
+                    "Authorization"
+                    if "Authorization" in masked_headers
+                    else "authorization"
+                )
                 auth_value = masked_headers[auth_key]
                 if auth_value.startswith("Bearer "):
                     token = auth_value[7:]
@@ -123,7 +134,9 @@ class DebugLogger:
                     parts = cookie_value.split("=", 1)
                     if len(parts) == 2:
                         st_token = parts[1].split(";")[0]
-                        masked_headers["Cookie"] = f"__Secure-next-auth.session-token={self._mask_token(st_token)}"
+                        masked_headers["Cookie"] = (
+                            f"__Secure-next-auth.session-token={self._mask_token(st_token)}"
+                        )
 
             for key, value in masked_headers.items():
                 self.logger.info(f"  {key}: {value}")
@@ -141,7 +154,9 @@ class DebugLogger:
             if files:
                 self.logger.info("\n📎 Files:")
                 try:
-                    if hasattr(files, 'keys') and callable(getattr(files, 'keys', None)):
+                    if hasattr(files, "keys") and callable(
+                        getattr(files, "keys", None)
+                    ):
                         for key in files.keys():
                             self.logger.info(f"  {key}: <file data>")
                     else:
@@ -164,7 +179,7 @@ class DebugLogger:
         status_code: int,
         headers: Dict[str, str],
         body: Any,
-        duration_ms: Optional[float] = None
+        duration_ms: Optional[float] = None,
     ):
         """Log API response details to log.txt"""
 
@@ -223,7 +238,7 @@ class DebugLogger:
         self,
         error_message: str,
         status_code: Optional[int] = None,
-        response_text: Optional[str] = None
+        response_text: Optional[str] = None,
     ):
         """Log API error details to log.txt"""
 
@@ -277,6 +292,7 @@ class DebugLogger:
             self.logger.warning(f"⚠️  [{self._format_timestamp()}] {message}")
         except Exception as e:
             self.logger.error(f"Error logging warning: {e}")
+
 
 # Global debug logger instance
 debug_logger = DebugLogger()
