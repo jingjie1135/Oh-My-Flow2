@@ -1,0 +1,18 @@
+services:
+  flow2api-personal:
+    build:
+      context: .
+      dockerfile: Dockerfile.headed
+    image: flow2api:personal
+    container_name: flow2api-personal
+    ports:
+      - "38102:8000"
+    volumes:
+      - ./data/personal:/app/data
+      - ./tmp/personal:/app/tmp
+      - ./config/setting.personal.toml:/app/config/setting.toml
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ALLOW_DOCKER_HEADED_CAPTCHA=true
+    shm_size: "2gb"
+    restart: unless-stopped

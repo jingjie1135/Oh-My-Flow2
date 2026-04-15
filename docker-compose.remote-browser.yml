@@ -1,0 +1,16 @@
+services:
+  flow2api-remote-browser:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: flow2api:remote-browser
+    container_name: flow2api-remote-browser
+    ports:
+      - "38103:8000"
+    volumes:
+      - ./data/remote-browser:/app/data
+      - ./tmp/remote-browser:/app/tmp
+      - ./config/setting.remote_browser.toml:/app/config/setting.toml
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

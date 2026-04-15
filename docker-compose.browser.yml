@@ -1,0 +1,18 @@
+services:
+  flow2api-browser:
+    build:
+      context: .
+      dockerfile: Dockerfile.headed
+    image: flow2api:browser
+    container_name: flow2api-browser
+    ports:
+      - "38101:8000"
+    volumes:
+      - ./data/browser:/app/data
+      - ./tmp/browser:/app/tmp
+      - ./config/setting.browser.toml:/app/config/setting.toml
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ALLOW_DOCKER_HEADED_CAPTCHA=true
+    shm_size: "2gb"
+    restart: unless-stopped

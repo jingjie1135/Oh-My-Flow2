@@ -1,0 +1,16 @@
+services:
+  flow2api-yescaptcha:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: flow2api:yescaptcha
+    container_name: flow2api-yescaptcha
+    ports:
+      - "38100:8000"
+    volumes:
+      - ./data/yescaptcha:/app/data
+      - ./tmp/yescaptcha:/app/tmp
+      - ./config/setting.yescaptcha.toml:/app/config/setting.toml
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
