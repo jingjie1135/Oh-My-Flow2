@@ -9,6 +9,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        xvfb \
+        fluxbox \
+        xauth \
         libglib2.0-0 \
         libnss3 \
         libnspr4 \
