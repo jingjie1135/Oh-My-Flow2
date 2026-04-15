@@ -41,6 +41,12 @@
 
 ### 方式一：Docker 部署（推荐）
 
+#### 相关文档
+
+- [验证码模式 Docker 对照表](./docs/%E9%AA%8C%E8%AF%81%E7%A0%81%E6%A8%A1%E5%BC%8F%20Docker%20%E5%AF%B9%E7%85%A7%E8%A1%A8.md)
+- [Docker 部署指南](./docs/Docker%E9%83%A8%E7%BD%B2%E6%8C%87%E5%8D%97.md)
+- [Flow2API 架构分析](./docs/Flow2API%20%E6%9E%B6%E6%9E%84%E5%88%86%E6%9E%90.md)
+
 #### 按验证码模式部署（推荐）
 
 | 打码模式 | Compose 文件 | 配置文件 | 主机端口 | 说明 |
