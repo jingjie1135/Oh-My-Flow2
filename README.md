@@ -34,55 +34,98 @@
 
 - 由于Flow增加了额外的验证码，你可以自行选择使用浏览器打码或第三发打码：
 注册[YesCaptcha](https://yescaptcha.com/i/13Xd8K)并获取api key，将其填入系统配置页面```YesCaptcha API密钥```区域
-- 默认 `docker-compose.yml` 建议搭配第三方打码（yescaptcha/capmonster/ezcaptcha/capsolver）。
-如需 Docker 内有头打码（browser/personal），请使用下方 `docker-compose.headed.yml`。
+- 默认 `docker-compose.yml` 仍可作为通用部署入口，但如果你想按验证码模式隔离部署，仓库现在也提供了 4 套独立 Compose 配置。
+- `browser` / `personal` 模式在 Docker 中需要有头浏览器环境，请使用对应的模式专用 Compose 文件。
 
 - 自动更新st浏览器拓展：[Flow2API-Token-Updater](https://github.com/TheSmallHanCat/Flow2API-Token-Updater)
 
 ### 方式一：Docker 部署（推荐）
 
-#### 标准模式（不使用代理）
+#### 按验证码模式部署（推荐）
+
+| 打码模式 | Compose 文件 | 配置文件 | 主机端口 | 说明 |
+|---------|--------------|----------|----------|------|
+| yescaptcha | `docker-compose.yescaptcha.yml` | `config/setting.yescaptcha.toml` | `38100` | 第三方打码平台，适合最简单部署 |
+| browser | `docker-compose.browser.yml` | `config/setting.browser.toml` | `38101` | Playwright 按请求启动浏览器，要求 Docker 有头环境 |
+| personal | `docker-compose.personal.yml` | `config/setting.personal.toml` | `38102` | 常驻标签页模式，支持 ST 自动续期，要求 Docker 有头环境 |
+| remote_browser | `docker-compose.remote-browser.yml` | `config/setting.remote_browser.toml` | `38103` | 依赖外部远程 token 池服务 |
+
+> 说明：每种模式都挂载独立的 `data/<mode>` 和 `tmp/<mode>`，避免 SQLite 把一种模式的配置持久化后污染另一种模式。
+
+#### yescaptcha 模式
 
 ```bash
-# 克隆项目
-git clone https://github.com/TheSmallHanCat/flow2api.git
-cd flow2api
-
-# 启动服务
-docker-compose up -d
+# 首次启动前，先编辑 config/setting.yescaptcha.toml，填入 yescaptcha_api_key
+docker compose -f docker-compose.yescaptcha.yml up -d --build
 
 # 查看日志
-docker-compose logs -f
+docker compose -f docker-compose.yescaptcha.yml logs -f
 ```
 
-> 说明：Compose 已默认挂载 `./tmp:/app/tmp`。如果把缓存超时设为 `0`，语义是“不自动过期删除”；若希望容器重建后仍保留缓存文件，也需要保留这个 `tmp` 挂载。
+访问地址：`http://localhost:38100`
 
-#### WARP 模式（使用代理）
+#### browser 模式
 
 ```bash
-# 使用 WARP 代理启动
-docker-compose -f docker-compose.warp.yml up -d
+# 启动 browser 模式（Docker 有头环境）
+docker compose -f docker-compose.browser.yml up -d --build
 
 # 查看日志
-docker-compose -f docker-compose.warp.yml logs -f
+docker compose -f docker-compose.browser.yml logs -f
 ```
 
-#### Docker 有头打码模式（browser / personal）
+访问地址：`http://localhost:38101`
 
-> 适用于你有虚拟化桌面需求、希望在容器里启用有头浏览器打码的场景。  
+#### personal 模式
+
+> 适用于你希望在容器里使用常驻标签页维持更稳定的验证码 / ST 自动续期能力。  
 > 该模式默认启动 `Xvfb + Fluxbox` 实现容器内部可视化，并设置 `ALLOW_DOCKER_HEADED_CAPTCHA=true`。  
 > 仅开放应用端口，不提供任何远程桌面连接端口。
 
 ```bash
-# 启动有头模式（首次建议带 --build）
-docker compose -f docker-compose.headed.yml up -d --build
+# 启动 personal 模式（首次建议带 --build）
+docker compose -f docker-compose.personal.yml up -d --build
 
 # 查看日志
-docker compose -f docker-compose.headed.yml logs -f
+docker compose -f docker-compose.personal.yml logs -f
 ```
 
-- API 端口：`8000`
-- 进入管理后台后，将验证码方式设为 `browser` 或 `personal`
+访问地址：`http://localhost:38102`
+
+#### remote_browser 模式
+
+> 该模式只负责调用外部远程浏览器 / token 池服务。启动前请先编辑 `config/setting.remote_browser.toml`，至少填写：
+>
+> - `remote_browser_base_url`
+> - `remote_browser_api_key`
+
+```bash
+docker compose -f docker-compose.remote-browser.yml up -d --build
+
+# 查看日志
+docker compose -f docker-compose.remote-browser.yml logs -f
+```
+
+访问地址：`http://localhost:38103`
+
+#### 通用模式（兼容旧文档）
+
+```bash
+# 保留原有默认 compose 用法
+docker compose up -d
+
+# 查看日志
+docker compose logs -f
+```
+
+#### WARP 模式（使用代理）
+
+```bash
+docker compose -f docker-compose.proxy.yml up -d
+
+# 查看日志
+docker compose -f docker-compose.proxy.yml logs -f
+```
 
 ### 方式二：本地部署
 
