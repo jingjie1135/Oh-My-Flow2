@@ -8,7 +8,7 @@ import asyncio
 import base64
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import gc
 import inspect
 import math
@@ -28,6 +28,8 @@ import types
 from pathlib import Path
 from typing import Optional, Dict, Any, Iterable, Generator
 from urllib.parse import urljoin, urlparse, urlunparse
+
+from curl_cffi.requests import AsyncSession
 
 from ..core.logger import debug_logger
 from ..core.config import config
@@ -361,7 +363,7 @@ def _read_windows_app_path(executable_name: str) -> Optional[str]:
         for key_path in key_candidates:
             try:
                 with winreg.OpenKey(root, key_path) as key:
-                    value, _ = winreg.QueryValueEx(key, None)
+                    value, _ = winreg.QueryValueEx(key, "")
                     resolved = str(value or "").strip().strip('"')
                     if resolved and os.path.exists(resolved):
                         return os.path.normpath(resolved)
@@ -514,6 +516,37 @@ def _resolve_browser_executable_path() -> tuple[Optional[str], str]:
         return normalized, "configured"
 
     return None, "auto"
+
+
+def _ensure_playwright_browser_path() -> Optional[str]:
+    """Best-effort Chromium executable lookup for manual startup diagnostics."""
+    detect_script = (
+        "from playwright.sync_api import sync_playwright\n"
+        "with sync_playwright() as p:\n"
+        "    print(p.chromium.executable_path or '')\n"
+    )
+    env = os.environ.copy()
+    env.setdefault(
+        "PLAYWRIGHT_BROWSERS_PATH",
+        os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "0") or "0",
+    )
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", detect_script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+        )
+        candidates = (result.stdout or "").strip().splitlines()
+        browser_path = candidates[-1].strip() if candidates else ""
+        if result.returncode == 0 and browser_path and os.path.exists(browser_path):
+            return os.path.normpath(browser_path)
+    except Exception as e:
+        debug_logger.log_info(f"[BrowserCaptcha] Playwright 浏览器路径检测失败: {e}")
+
+    return _detect_real_browser_executable_path()
 
 
 def _build_personal_browser_args(
@@ -1500,6 +1533,9 @@ class BrowserCaptchaService:
         )
         self._last_health_probe_at = 0.0
         self._last_health_probe_ok = False
+        self._resident_runtime_ready = False
+        self._browser_startup_diagnostics: Dict[str, Any] = {}
+        self._diagnostics_lock = asyncio.Lock()
         self._fingerprint_cache_ttl_seconds = max(
             0.0,
             float(

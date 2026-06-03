@@ -2,8 +2,10 @@ import itertools
 import json
 import types
 import unittest
-from unittest.mock import AsyncMock
+from typing import Tuple, cast
+from unittest.mock import AsyncMock, patch
 
+import src.services.browser_captcha_personal as browser_personal
 from src.services.browser_captcha_personal import (
     BrowserCaptchaService,
     ResidentTabInfo,
@@ -70,6 +72,12 @@ def _fake_cdp_command():
 
 
 class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
+    service: BrowserCaptchaService
+
+    def __init__(self, methodName: str = "runTest") -> None:
+        super().__init__(methodName)
+        self.service = BrowserCaptchaService()
+
     def setUp(self):
         self.service = BrowserCaptchaService()
 
@@ -250,11 +258,12 @@ class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
         self.service._ensure_resident_token_binding = AsyncMock(return_value=True)
         self.service._solve_with_resident_tab = AsyncMock(side_effect=solve_resident)
 
-        token, slot_id = await self.service._get_token_direct(
+        direct_result = await self.service._get_token_direct(
             "project-1",
             token_id=1,
             return_slot_id=True,
         )
+        token, slot_id = cast(Tuple[str, str], direct_result)
 
         self.assertEqual((token, slot_id), ("token-1", "slot-1"))
         self.assertEqual(events, ["fresh_restart", "initialize", "ensure_resident", "solve_resident"])
@@ -353,6 +362,59 @@ class BrowserCaptchaPersonalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(connection.connect_count, 1)
         self.assertEqual(connection.register_count, 1)
         self.assertTrue(getattr(connection, "_flow2api_send_patched", False))
+
+    async def test_browser_startup_diagnostics_state_is_initialized(self):
+        self.assertEqual(self.service.get_browser_startup_diagnostics(), {})
+        self.assertFalse(self.service._resident_runtime_ready)
+
+        self.service._set_browser_startup_diagnostics(reason="unit_test")
+
+        diagnostics = self.service.get_browser_startup_diagnostics()
+        self.assertTrue(diagnostics["available"])
+        self.assertEqual(diagnostics["reason"], "unit_test")
+        self.assertIn("+00:00", diagnostics["generated_at"])
+
+    async def test_manual_browser_probe_uses_fallback_browser_lookup(self):
+        service = BrowserCaptchaService()
+        service._collect_browser_startup_diagnostics = AsyncMock(
+            return_value={"probe_status": "skipped"}
+        )
+
+        with patch.object(
+            browser_personal,
+            "_ensure_playwright_browser_path",
+            return_value="C:/Program Files/Chrome/chrome.exe",
+        ):
+            diagnostics = await service.run_browser_startup_probe()
+
+        self.assertEqual(diagnostics, {"probe_status": "skipped"})
+        service._collect_browser_startup_diagnostics.assert_awaited_once()
+        browser_path, browser_args = service._collect_browser_startup_diagnostics.call_args.args[:2]
+        self.assertEqual(browser_path, "C:/Program Files/Chrome/chrome.exe")
+        self.assertIn("--headless=new", browser_args)
+
+    def test_playwright_browser_path_falls_back_to_real_browser_lookup(self):
+        completed = types.SimpleNamespace(
+            returncode=0,
+            stdout="C:/missing/chrome.exe\n",
+            stderr="",
+        )
+
+        def exists(path):
+            return path == "C:/fallback/chrome.exe"
+
+        with patch.object(browser_personal.subprocess, "run", return_value=completed), patch.object(
+            browser_personal.os.path,
+            "exists",
+            side_effect=exists,
+        ), patch.object(
+            browser_personal,
+            "_detect_real_browser_executable_path",
+            return_value="C:/fallback/chrome.exe",
+        ):
+            browser_path = browser_personal._ensure_playwright_browser_path()
+
+        self.assertEqual(browser_path, "C:/fallback/chrome.exe")
 
 
 if __name__ == "__main__":
