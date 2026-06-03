@@ -26,7 +26,7 @@ import tempfile
 import subprocess
 import types
 from pathlib import Path
-from typing import Optional, Dict, Any, Iterable, Generator
+from typing import Optional, Dict, Any, Iterable, Generator, Literal, overload
 from urllib.parse import urljoin, urlparse, urlunparse
 
 from curl_cffi.requests import AsyncSession
@@ -699,8 +699,8 @@ def _tune_personal_browser_args_for_docker_headed(
 
 # 尝试导入 nodriver
 uc = None
-NODRIVER_AVAILABLE = False
-_NODRIVER_RUNTIME_PATCHED = False
+_nodriver_available = False
+_nodriver_runtime_patched = False
 
 if DOCKER_HEADED_BLOCKED:
     debug_logger.log_warning(
@@ -720,7 +720,7 @@ else:
         try:
             import nodriver as uc
 
-            NODRIVER_AVAILABLE = True
+            _nodriver_available = True
         except ImportError as e:
             debug_logger.log_error(f"[BrowserCaptcha] nodriver 导入失败: {e}")
             print(f"[BrowserCaptcha] ❌ nodriver 导入失败: {e}")
@@ -818,16 +818,16 @@ def _is_runtime_normal_close_error(error: Any) -> bool:
     return any(keyword in error_text for keyword in _NORMAL_CLOSE_KEYWORDS)
 
 
-class _NodriverPatchedSendTransaction(asyncio.Future):
+class _NodriverPatchedSendTransaction(asyncio.Future[Any]):
     """Future-compatible CDP transaction for older nodriver connection shapes."""
 
     def __init__(
         self,
-        cdp_obj: Generator[Dict[str, Any], Dict[str, Any], Any],
+        cdp_obj: Generator[Dict[str, Any], Any, Any],
         tx_id: int,
     ) -> None:
         super().__init__()
-        self._cdp_obj: Generator[Dict[str, Any], Dict[str, Any], Any] = cdp_obj
+        self._cdp_obj: Generator[Dict[str, Any], Any, Any] = cdp_obj
         method, *params = next(cdp_obj).values()
         if params:
             params = params.pop()
@@ -851,7 +851,7 @@ class _NodriverPatchedSendTransaction(asyncio.Future):
 
 
 def _finalize_nodriver_send_task(
-    connection, transaction, tx_id: int, task: asyncio.Task
+    connection, transaction, tx_id: int, task: asyncio.Task[Any]
 ):
     """回收 nodriver websocket.send 的后台异常，避免事件循环打印未检索 task 错误。"""
     try:
@@ -1002,16 +1002,16 @@ def _patch_nodriver_browser_instance(browser_instance):
 
 def _patch_nodriver_runtime(browser_instance=None):
     """给 nodriver 当前浏览器实例补一层断连降噪与异常透传。"""
-    global _NODRIVER_RUNTIME_PATCHED
+    global _nodriver_runtime_patched
 
-    if not NODRIVER_AVAILABLE or uc is None:
+    if not _nodriver_available or uc is None:
         return
 
     if browser_instance is not None:
         _patch_nodriver_browser_instance(browser_instance)
 
-    if not _NODRIVER_RUNTIME_PATCHED:
-        _NODRIVER_RUNTIME_PATCHED = True
+    if not _nodriver_runtime_patched:
+        _nodriver_runtime_patched = True
         debug_logger.log_info("[BrowserCaptcha] 已启用 nodriver 运行态安全补丁")
 
 
@@ -1519,7 +1519,7 @@ class BrowserCaptchaService:
             60,
             int(getattr(config, "personal_idle_tab_ttl_seconds", 600) or 600),
         )
-        self._idle_reaper_task: Optional[asyncio.Task] = None  # 空闲回收任务
+        self._idle_reaper_task: Optional[asyncio.Task[Any]] = None  # 空闲回收任务
         self._command_timeout_seconds = 8.0
         self._navigation_timeout_seconds = 20.0
         self._solve_timeout_seconds = 45.0
@@ -1553,14 +1553,14 @@ class BrowserCaptchaService:
         self._last_fingerprint: Optional[Dict[str, Any]] = None
         self._resident_error_streaks: dict[str, int] = {}
         self._resident_unavailable_slots: set[str] = set()
-        self._resident_warmup_task: Optional[asyncio.Task] = None
-        self._resident_rebuild_tasks: dict[str, asyncio.Task] = {}
-        self._resident_recovery_tasks: dict[str, asyncio.Task] = {}
+        self._resident_warmup_task: Optional[asyncio.Task[Any]] = None
+        self._resident_rebuild_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._resident_recovery_tasks: dict[str, asyncio.Task[Any]] = {}
         self._last_runtime_restart_at = 0.0
         self._runtime_last_active_at = time.time()
         self._successful_solves_since_browser_start = 0
         self._fresh_profile_restart_pending = False
-        self._fresh_profile_restart_task: Optional[asyncio.Task] = None
+        self._fresh_profile_restart_task: Optional[asyncio.Task[Any]] = None
         self._fresh_profile_restart_force_pending = False
         self._browser_launch_failure_streak = 0
         self._browser_launch_cooldown_until = 0.0
@@ -2300,7 +2300,7 @@ class BrowserCaptchaService:
                 "Docker 内置浏览器打码已启用，但 DISPLAY 未设置。"
                 "请设置 DISPLAY（例如 :99）并启动 Xorg/Xdummy 等虚拟显示。"
             )
-        if not NODRIVER_AVAILABLE or uc is None:
+        if not _nodriver_available or uc is None:
             raise RuntimeError(
                 "nodriver 未安装或不可用。请手动安装: pip install nodriver"
             )
@@ -3010,6 +3010,8 @@ class BrowserCaptchaService:
             if target_url.lower() != PERSONAL_COOKIE_PREBIND_URL
             else target_url
         )
+        if self.browser is None:
+            raise RuntimeError("浏览器尚未初始化")
         tab = await self._run_with_timeout(
             self.browser.get(prebind_url, new_tab=new_tab, new_window=new_window),
             timeout_seconds or self._navigation_timeout_seconds,
@@ -3495,7 +3497,8 @@ class BrowserCaptchaService:
                 "geolocation": {"latitude": 35.6762, "longitude": 139.6503, "accuracy": 18.0},
             },
         )
-        locale_profile = dict(locale_profiles[digest[2] % len(locale_profiles)])
+        locale_profile: Dict[str, Any] = dict(locale_profiles[digest[2] % len(locale_profiles)])
+        geolocation_profile = dict(locale_profile.get("geolocation") or {})
         desktop_profiles = (
             {"width": 1366, "height": 768, "hardwareConcurrency": 4, "deviceMemory": 4},
             {"width": 1440, "height": 900, "hardwareConcurrency": 8, "deviceMemory": 8},
@@ -3555,9 +3558,9 @@ class BrowserCaptchaService:
                 "id": str(locale_profile["timezoneId"]),
             },
             "geolocation": {
-                "latitude": float(locale_profile["geolocation"]["latitude"]),
-                "longitude": float(locale_profile["geolocation"]["longitude"]),
-                "accuracy": float(locale_profile["geolocation"]["accuracy"]),
+                "latitude": float(geolocation_profile["latitude"]),
+                "longitude": float(geolocation_profile["longitude"]),
+                "accuracy": float(geolocation_profile["accuracy"]),
             },
             "permissions": {
                 "geolocation": "granted",
@@ -6228,8 +6231,11 @@ class BrowserCaptchaService:
                     f"[BrowserCaptcha] 按 context 读取 cookies 失败，回退全局 cookie jar ({label}): {e}"
                 )
 
+        browser = self.browser
+        if browser is None:
+            raise RuntimeError("浏览器尚未初始化")
         return await self._run_with_timeout(
-            self.browser.cookies.get_all(),
+            browser.cookies.get_all(),
             timeout_seconds or self._command_timeout_seconds,
             label,
         )
@@ -6240,8 +6246,11 @@ class BrowserCaptchaService:
         label: Optional[str] = None,
         timeout_seconds: Optional[float] = None,
     ):
+        browser = self.browser
+        if browser is None:
+            raise RuntimeError("浏览器尚未初始化")
         return await self._run_with_timeout(
-            self.browser.connection.send(command),
+            browser.connection.send(command),
             timeout_seconds or self._command_timeout_seconds,
             label or "browser.command",
         )
@@ -6327,7 +6336,7 @@ class BrowserCaptchaService:
         return f"{self._slot_id_prefix}slot-{self._resident_slot_seq}"
 
     @staticmethod
-    def _normalize_token_key(token_id: Optional[int]) -> str:
+    def _normalize_token_key(token_id: Optional[int | str]) -> str:
         try:
             normalized = int(token_id or 0)
         except Exception:
@@ -7392,10 +7401,11 @@ class BrowserCaptchaService:
                         clear_cookie_command = cdp.storage.clear_cookies()
                     else:
                         clear_cookie_command = cdp.storage.clear_cookies(browser_context_id=browser_context_id)
+                    browser = self.browser
+                    if browser is None:
+                        raise RuntimeError("浏览器尚未初始化")
                     await self._run_with_timeout(
-                        self.browser.connection.send(
-                            clear_cookie_command
-                        ),
+                        browser.connection.send(clear_cookie_command),
                         timeout_seconds=8.0,
                         label=f"storage.clear_cookies:{label}:{token_key}",
                     )
@@ -7622,6 +7632,30 @@ class BrowserCaptchaService:
         )
         return pool[pick_index]
 
+    @overload
+    async def _ensure_resident_tab(
+        self,
+        project_id: Optional[str] = None,
+        token_id: Optional[int] = None,
+        *,
+        force_create: bool = False,
+        reserve_for_solve: bool = False,
+        return_slot_key: Literal[True],
+    ) -> tuple[Optional[str], Optional[ResidentTabInfo]]:
+        ...
+
+    @overload
+    async def _ensure_resident_tab(
+        self,
+        project_id: Optional[str] = None,
+        token_id: Optional[int] = None,
+        *,
+        force_create: bool = False,
+        reserve_for_solve: bool = False,
+        return_slot_key: Literal[False] = False,
+    ) -> Optional[ResidentTabInfo]:
+        ...
+
     async def _ensure_resident_tab(
         self,
         project_id: Optional[str] = None,
@@ -7839,6 +7873,30 @@ class BrowserCaptchaService:
                     self._remember_project_affinity(project_id, new_slot_id, resident_info)
                     self._sync_compat_resident_state()
                     return wrap(new_slot_id, resident_info)
+
+    @overload
+    async def _rebuild_resident_tab(
+        self,
+        project_id: Optional[str] = None,
+        token_id: Optional[int] = None,
+        *,
+        slot_id: Optional[str] = None,
+        reserve_for_solve: bool = False,
+        return_slot_key: Literal[True],
+    ) -> tuple[Optional[str], Optional[ResidentTabInfo]]:
+        ...
+
+    @overload
+    async def _rebuild_resident_tab(
+        self,
+        project_id: Optional[str] = None,
+        token_id: Optional[int] = None,
+        *,
+        slot_id: Optional[str] = None,
+        reserve_for_solve: bool = False,
+        return_slot_key: Literal[False] = False,
+    ) -> Optional[ResidentTabInfo]:
+        ...
 
     async def _rebuild_resident_tab(
         self,
@@ -8352,7 +8410,7 @@ class BrowserCaptchaService:
 
     async def _cancel_background_runtime_tasks(self, *, reason: str) -> None:
         current_task = asyncio.current_task()
-        tasks_to_cancel: list[asyncio.Task] = []
+        tasks_to_cancel: list[asyncio.Task[Any]] = []
 
         async with self._resident_lock:
             candidate_tasks = []
@@ -9211,6 +9269,7 @@ class BrowserCaptchaService:
             browser_executable_path = None
             display_value = os.environ.get("DISPLAY", "").strip()
             browser_args = []
+            effective_launch_args: list[str] = []
             sandbox_enabled = _resolve_personal_browser_sandbox_enabled()
 
             if self._initialized and self.browser:
@@ -9335,14 +9394,18 @@ class BrowserCaptchaService:
                         except Exception:
                             effective_uid = "unknown"
 
-                    launch_kwargs = {
+                    driver = uc
+                    if driver is None:
+                        raise RuntimeError("nodriver 未安装或不可用。请手动安装: pip install nodriver")
+                    effective_launch_args: list[str] = []
+                    launch_kwargs: Dict[str, Any] = {
                         "headless": self.headless,
                         "user_data_dir": self.user_data_dir,
                         "browser_executable_path": browser_executable_path,
                         "browser_args": browser_args,
                         "sandbox": sandbox_enabled,
                     }
-                    launch_config = uc.Config(**launch_kwargs)
+                    launch_config = driver.Config(**launch_kwargs)
                     effective_launch_args = launch_config()
                     debug_logger.log_info(
                         "[BrowserCaptcha] nodriver 启动上下文: "
@@ -9363,7 +9426,7 @@ class BrowserCaptchaService:
 
                     while launch_plan:
                         launch_label, current_launch_kwargs, retry_reason = launch_plan.pop(0)
-                        current_config = uc.Config(**current_launch_kwargs)
+                        current_config = driver.Config(**current_launch_kwargs)
                         effective_launch_args = current_config()
                         if retry_reason:
                             debug_logger.log_warning(
@@ -9372,7 +9435,7 @@ class BrowserCaptchaService:
                             )
                         try:
                             self.browser = await self._run_with_timeout(
-                                uc.start(**current_launch_kwargs),
+                                driver.start(**current_launch_kwargs),
                                 timeout_seconds=30.0,
                                 label=launch_label,
                             )
@@ -9432,8 +9495,10 @@ class BrowserCaptchaService:
                                 continue
                             raise
 
-                    if self.browser is None and last_start_error is not None:
-                        raise last_start_error
+                    if self.browser is None:
+                        if last_start_error is not None:
+                            raise last_start_error
+                        raise RuntimeError("nodriver 浏览器启动后未返回实例")
 
                     _patch_nodriver_runtime(self.browser)
                     live_user_agent, live_product = await self._get_live_browser_runtime_identity()
@@ -9799,7 +9864,8 @@ class BrowserCaptchaService:
                         self._clear_resident_slot_unavailable_locked(resolved_slot_id)
                     self._remember_project_affinity(project_id, resolved_slot_id, resident_info)
                     self._remember_token_affinity(token_id, resolved_slot_id, resident_info)
-                    self._resident_error_streaks.pop(resolved_slot_id, None)
+                    if resolved_slot_id:
+                        self._resident_error_streaks.pop(resolved_slot_id, None)
                     debug_logger.log_warning(
                         f"[BrowserCaptcha] project_id={project_id}, slot={resolved_slot_id} 清理后已恢复 reCAPTCHA"
                     )
@@ -10752,6 +10818,32 @@ class BrowserCaptchaService:
 
     # ========== 主要 API ==========
 
+    @overload
+    async def _get_token_direct(
+        self,
+        project_id: str,
+        action: str = "IMAGE_GENERATION",
+        token_id: Optional[int] = None,
+        *,
+        return_slot_id: Literal[True],
+        allow_affinity: bool = True,
+        remember_affinity: bool = True,
+    ) -> tuple[Optional[str], Optional[str]]:
+        ...
+
+    @overload
+    async def _get_token_direct(
+        self,
+        project_id: str,
+        action: str = "IMAGE_GENERATION",
+        token_id: Optional[int] = None,
+        *,
+        return_slot_id: Literal[False] = False,
+        allow_affinity: bool = True,
+        remember_affinity: bool = True,
+    ) -> Optional[str]:
+        ...
+
     async def _get_token_direct(
         self,
         project_id: str,
@@ -10933,7 +11025,7 @@ class BrowserCaptchaService:
                         )
                         reserved_slot_id = slot_id or None
 
-            if resident_info and resident_info.recaptcha_ready and resident_info.tab:
+            if resident_info and resident_info.recaptcha_ready and resident_info.tab and slot_id:
                 debug_logger.log_info(
                     f"[BrowserCaptcha] 从共享常驻标签页即时生成 token (slot={slot_id}, project={project_id}, action={action})..."
                 )
@@ -11021,7 +11113,7 @@ class BrowserCaptchaService:
                             )
                             reserved_slot_id = slot_id or None
 
-                    if resident_info:
+                    if resident_info and slot_id:
                         needs_secondary_rebuild = False
                         try:
                             token = await self._solve_with_resident_tab(
@@ -11149,6 +11241,28 @@ class BrowserCaptchaService:
             return finish_result(legacy_token, None)
         finally:
             await release_reserved_slot()
+
+    @overload
+    async def get_token(
+        self,
+        project_id: str,
+        action: str = "IMAGE_GENERATION",
+        token_id: Optional[int] = None,
+        *,
+        return_slot_id: Literal[True],
+    ) -> tuple[Optional[str], Optional[str]]:
+        ...
+
+    @overload
+    async def get_token(
+        self,
+        project_id: str,
+        action: str = "IMAGE_GENERATION",
+        token_id: Optional[int] = None,
+        *,
+        return_slot_id: Literal[False] = False,
+    ) -> Optional[str]:
+        ...
 
     async def get_token(
         self,
@@ -11923,6 +12037,9 @@ class BrowserCaptchaService:
                         }
                         self._custom_tabs[cache_key] = custom_info
 
+                    if not isinstance(custom_info, dict):
+                        raise RuntimeError("自定义页面状态异常")
+
                     page_loaded = False
                     for _ in range(20):
                         ready_state = await self._tab_evaluate(
@@ -12136,15 +12253,15 @@ class _PersonalBrowserPoolService:
         self._token_worker_affinity: dict[str, int] = {}
         self._affinity_cache_limit = 256
         self._last_successful_worker_index: Optional[int] = None
-        self._idle_worker_reaper_task: Optional[asyncio.Task] = None
+        self._idle_worker_reaper_task: Optional[asyncio.Task[Any]] = None
         self._token_pool_lock = asyncio.Lock()
         self._token_pool_queues: dict[str, deque[TokenPoolLease]] = {}
         self._token_pool_conditions: dict[str, asyncio.Condition] = {}
         self._token_pool_waiters: dict[str, int] = {}
         self._token_pool_bucket_meta: dict[str, Dict[str, Any]] = {}
         self._token_pool_refill_inflight: dict[str, int] = {}
-        self._token_pool_fill_tasks: set[asyncio.Task] = set()
-        self._token_pool_maintainer_task: Optional[asyncio.Task] = None
+        self._token_pool_fill_tasks: set[asyncio.Task[Any]] = set()
+        self._token_pool_maintainer_task: Optional[asyncio.Task[Any]] = None
         self._token_pool_last_refill_at = 0.0
         self._token_pool_last_token_at = 0.0
         self._token_pool_stats: dict[str, int] = {
@@ -12381,7 +12498,7 @@ class _PersonalBrowserPoolService:
             "next_expire_in_seconds": next_expire_in_seconds,
         }
 
-    def _discard_finished_token_pool_task(self, task: asyncio.Task) -> None:
+    def _discard_finished_token_pool_task(self, task: asyncio.Task[Any]) -> None:
         self._token_pool_fill_tasks.discard(task)
         try:
             task.result()
@@ -12402,7 +12519,7 @@ class _PersonalBrowserPoolService:
         return str(project_id or "").strip()
 
     @staticmethod
-    def _normalize_token_key(token_id: Optional[int]) -> str:
+    def _normalize_token_key(token_id: Optional[int | str]) -> str:
         return BrowserCaptchaService._normalize_token_key(token_id)
 
     @staticmethod
@@ -12536,7 +12653,7 @@ class _PersonalBrowserPoolService:
     def _worker_has_token_mapping(
         self,
         worker: BrowserCaptchaService,
-        token_id: Optional[int],
+        token_id: Optional[int | str],
     ) -> bool:
         normalized_token_key = self._normalize_token_key(token_id)
         if not normalized_token_key:
@@ -13347,6 +13464,32 @@ class _PersonalBrowserPoolService:
             except Exception as e:
                 debug_logger.log_warning(f"[BrowserCaptchaPool] 关闭浏览器实例失败: {e}")
 
+    @overload
+    async def _get_token_direct(
+        self,
+        project_id: str,
+        action: str = "IMAGE_GENERATION",
+        token_id: Optional[int] = None,
+        *,
+        return_slot_id: Literal[True],
+        allow_affinity: bool = True,
+        remember_affinity: bool = True,
+    ) -> tuple[Optional[str], Optional[str]]:
+        ...
+
+    @overload
+    async def _get_token_direct(
+        self,
+        project_id: str,
+        action: str = "IMAGE_GENERATION",
+        token_id: Optional[int] = None,
+        *,
+        return_slot_id: Literal[False] = False,
+        allow_affinity: bool = True,
+        remember_affinity: bool = True,
+    ) -> Optional[str]:
+        ...
+
     async def _get_token_direct(
         self,
         project_id: str,
@@ -13586,7 +13729,7 @@ class _PersonalBrowserPoolService:
         warmed_slots: list[Optional[str]] = []
         results = await asyncio.gather(*warmup_tasks, return_exceptions=True)
         for result in results:
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 debug_logger.log_warning(
                     f"[BrowserCaptchaPool] resident tabs 预热 worker 失败: {result}"
                 )
