@@ -30,5 +30,10 @@ class ZeaburTemplateTest(unittest.TestCase):
         self.assertIn('captcha_method = "browser"', template)
         self.assertNotIn('captcha_method = "personal"', template)
 
+    def test_template_uses_project_github_repo_id(self) -> None:
+        template = _template_text()
+
+        self.assertIn("repo: 1210757887", template)
+
 if __name__ == "__main__":
     _ = unittest.main()
