@@ -304,6 +304,7 @@ Prometheus 可直接抓 `/metrics`。如果部署到 Kubernetes，建议只在�
 > - 横屏 / 竖屏 `R2V` 模型共用同一套新版请求体
 > - 横屏 `R2V` 的上游 `videoModelKey` 已切换为 `*_landscape` 形式
 > - 根据当前上游协议，`referenceImages` 当前最多传 **3 张**
+> - `gemini-omni-flash` 第一阶段按 R2V 接入：必须提供 **1-3 张参考图**，支持 `duration` 为 `4` / `6` / `8` / `10` 秒，支持 `16:9` / `9:16`
 
 | 模型名称 | 说明| 尺寸 |
 |---------|---------|--------|
@@ -313,6 +314,15 @@ Prometheus 可直接抓 `/metrics`。如果部署到 Kubernetes，建议只在�
 | `veo_3_1_r2v_fast_landscape_ultra` | 图生视频 | 横屏 |
 | `veo_3_1_r2v_fast_portrait_ultra_relaxed` | 图生视频 | 竖屏 |
 | `veo_3_1_r2v_fast_landscape_ultra_relaxed` | 图生视频 | 横屏 |
+| `gemini-omni-flash` | Gemini Omni Flash R2V（按参数自动解析） | 横屏/竖屏 |
+| `gemini-omni-flash-4s-landscape` | Gemini Omni Flash R2V 4秒 | 横屏 |
+| `gemini-omni-flash-4s-portrait` | Gemini Omni Flash R2V 4秒 | 竖屏 |
+| `gemini-omni-flash-6s-landscape` | Gemini Omni Flash R2V 6秒 | 横屏 |
+| `gemini-omni-flash-6s-portrait` | Gemini Omni Flash R2V 6秒 | 竖屏 |
+| `gemini-omni-flash-8s-landscape` | Gemini Omni Flash R2V 8秒 | 横屏 |
+| `gemini-omni-flash-8s-portrait` | Gemini Omni Flash R2V 8秒 | 竖屏 |
+| `gemini-omni-flash-10s-landscape` | Gemini Omni Flash R2V 10秒 | 横屏 |
+| `gemini-omni-flash-10s-portrait` | Gemini Omni Flash R2V 10秒 | 竖屏 |
 
 #### 视频放大模型 (Upsample)
 
@@ -382,6 +392,7 @@ Prometheus 可直接抓 `/metrics`。如果部署到 Kubernetes，建议只在�
 > - `generationConfig.responseModalities`
 > - `generationConfig.imageConfig.aspectRatio`
 > - `generationConfig.imageConfig.imageSize`
+> - `generationConfig.duration` / `generationConfig.videoDuration`（视频别名解析）
 
 ### Gemini 官方 generateContent（文生图）
 
@@ -485,6 +496,41 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
   }'
 ```
 
+### Gemini 官方 generateContent（Gemini Omni Flash R2V）
+
+> 第一阶段支持文本 + 图片参考的 R2V 调用；音频/视频输入、对话式视频编辑、首尾帧等能力暂未在本项目中接入。
+> `duration` 支持 `4` / `6` / `8` / `10`，非法值会回退到默认 `4` 秒。
+
+```bash
+curl -X POST "http://localhost:8000/models/gemini-omni-flash:generateContent" \
+  -H "x-goog-api-key: han1234" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contents": [
+      {
+        "role": "user",
+        "parts": [
+          {
+            "text": "参考这张角色图，生成一个镜头缓慢推进的 6 秒横屏视频"
+          },
+          {
+            "inlineData": {
+              "mimeType": "image/jpeg",
+              "data": "<参考图base64>"
+            }
+          }
+        ]
+      }
+    ],
+    "generationConfig": {
+      "duration": 6,
+      "imageConfig": {
+        "aspectRatio": "16:9"
+      }
+    }
+  }'
+```
+
 ### 首尾帧生成视频
 
 ```bash
@@ -525,6 +571,7 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
 > `R2V` 会由服务端自动组装新版视频请求体，调用方仍然使用 OpenAI 兼容输入即可。
 > 服务端会将横屏 `R2V` 自动映射到最新的 `*_landscape` 上游模型键。
 > 当前最多传 **3 张参考图**。
+> `gemini-omni-flash` 可作为 OpenAI 兼容别名使用，服务端会根据 `generationConfig.duration` 和 `generationConfig.imageConfig.aspectRatio` 解析到具体 `gemini-omni-flash-{duration}s-{orientation}` 变体。
 
 ```bash
 curl -X POST "http://localhost:8000/v1/chat/completions" \
@@ -561,6 +608,41 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
         ]
       }
     ],
+    "stream": true
+  }'
+```
+
+#### Gemini Omni Flash（OpenAI 兼容 R2V）
+
+```bash
+curl -X POST "http://localhost:8000/v1/chat/completions" \
+  -H "Authorization: Bearer han1234" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemini-omni-flash",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "保留参考图中的角色造型，生成一段 9:16 的 8 秒动态视频"
+          },
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "data:image/jpeg;base64,<参考图1base64>"
+            }
+          }
+        ]
+      }
+    ],
+    "generationConfig": {
+      "duration": 8,
+      "imageConfig": {
+        "aspectRatio": "9:16"
+      }
+    },
     "stream": true
   }'
 ```

@@ -42,6 +42,9 @@ def get_required_paygate_tier_for_model(model_name: Optional[str]) -> str:
     if not normalized:
         return PAYGATE_TIER_NOT_PAID
 
+    if normalized.startswith("gemini-omni-flash") or normalized.startswith("abra_r2v_"):
+        return PAYGATE_TIER_ONE
+
     if normalized.endswith("-4k") or normalized.endswith("_4k") or "_ultra" in normalized:
         return PAYGATE_TIER_TWO
 

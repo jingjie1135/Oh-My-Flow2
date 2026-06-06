@@ -95,6 +95,9 @@ IMAGE_SIZE_MAP = {
 # 默认 aspectRatio
 DEFAULT_ASPECT = "landscape"
 
+OMNI_FLASH_DURATIONS = (4, 6, 8, 10)
+OMNI_FLASH_DEFAULT_DURATION = 4
+
 OPENAI_IMAGE_SIZE_RE = re.compile(r"^(?P<w>\d{2,5})\s*[xX]\s*(?P<h>\d{2,5})$")
 
 # OpenAI 常见 quality → imageSize 映射
@@ -286,6 +289,10 @@ VIDEO_BASE_MODELS = {
         "landscape": "veo_3_1_r2v_fast_ultra_relaxed",
         "portrait": "veo_3_1_r2v_fast_portrait_ultra_relaxed",
     },
+    "gemini-omni-flash": {
+        "landscape": "gemini-omni-flash-4s-landscape",
+        "portrait": "gemini-omni-flash-4s-portrait",
+    },
     # Extend models (视频续写)
     "veo_3_1_extend": {
         "landscape": "veo_3_1_extend",
@@ -294,8 +301,8 @@ VIDEO_BASE_MODELS = {
 }
 
 
-def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str]]:
-    """从请求中提取 aspectRatio 和 imageSize 参数。
+def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str], Optional[int]]:
+    """从请求中提取 aspectRatio、imageSize 和 duration 参数。
 
     优先级：
     1. request.generationConfig.imageConfig (顶层 Gemini 参数)
@@ -303,7 +310,7 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str]]:
     3. OpenAI 风格字段（size/quality）兼容：可在 generationConfig/imageConfig 或顶层 extra 中出现
 
     Returns:
-        (aspect_ratio, image_size) 归一化后的值
+        (aspect_ratio, image_size, duration) 归一化后的值
     """
     def _normalize_str(value: Any) -> Optional[str]:
         if not isinstance(value, str):
@@ -374,6 +381,17 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str]]:
             return mapped or None
         return token.lower()
 
+    def _normalize_duration(value: Any) -> Optional[int]:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, str):
+            text = value.strip().lower().removesuffix("s")
+            if text.isdigit():
+                return int(text)
+        return None
+
     def _aspect_from_openai_size(value: Any) -> Optional[str]:
         raw = _normalize_str(value)
         if not raw:
@@ -436,10 +454,14 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str]]:
 
     aspect_ratio: Optional[str] = None
     image_size: Optional[str] = None
+    duration: Optional[int] = None
 
     # 1) 优先从 request.generationConfig 解析
     gen_config = getattr(request, "generationConfig", None)
     if gen_config is not None:
+        duration = _normalize_duration(
+            _read_value(gen_config, "duration", "videoDuration", "video_duration", "durationSeconds", "duration_seconds")
+        )
         image_config = _read_value(gen_config, "imageConfig", "image_config")
         if image_config is not None:
             aspect_ratio, image_size = _apply_image_config(
@@ -462,7 +484,7 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str]]:
             image_size = _image_size_from_openai_quality(_read_value(gen_config, "quality"))
 
     # 2) 顶层没有时，再尝试从 extra fields (Pydantic extra="allow") 中透传的 generationConfig
-    if (aspect_ratio is None or image_size is None) and hasattr(request, "__pydantic_extra__"):
+    if (aspect_ratio is None or image_size is None or duration is None) and hasattr(request, "__pydantic_extra__"):
         extra = request.__pydantic_extra__ or {}
         gen_config_raw = extra.get("generationConfig")
         if not isinstance(gen_config_raw, dict):
@@ -471,6 +493,14 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str]]:
                 gen_config_raw = extra_body.get("generationConfig")
 
         if isinstance(gen_config_raw, dict):
+            if duration is None:
+                duration = _normalize_duration(
+                    gen_config_raw.get("duration")
+                    or gen_config_raw.get("videoDuration")
+                    or gen_config_raw.get("video_duration")
+                    or gen_config_raw.get("durationSeconds")
+                    or gen_config_raw.get("duration_seconds")
+                )
             image_config_raw = (
                 gen_config_raw.get("imageConfig")
                 or gen_config_raw.get("image_config")
@@ -496,7 +526,7 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str]]:
                 image_size = _image_size_from_openai_quality(gen_config_raw.get("quality"))
 
     # 3) OpenAI 风格 size/quality（顶层 extra）兼容
-    if (aspect_ratio is None or image_size is None) and hasattr(request, "__pydantic_extra__"):
+    if (aspect_ratio is None or image_size is None or duration is None) and hasattr(request, "__pydantic_extra__"):
         extra = request.__pydantic_extra__ or {}
         if aspect_ratio is None:
             aspect_ratio = _aspect_from_openai_size(extra.get("size"))
@@ -509,11 +539,20 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str]]:
         if image_size is None:
             image_size = _normalize_image_size(extra.get("image_size") or extra.get("imageSize"))
 
-    return aspect_ratio, image_size
+        if duration is None:
+            duration = _normalize_duration(
+                extra.get("duration")
+                or extra.get("videoDuration")
+                or extra.get("video_duration")
+                or extra.get("durationSeconds")
+                or extra.get("duration_seconds")
+            )
+
+    return aspect_ratio, image_size, duration
 
 
 def resolve_model_name(
-    model: str, request=None, model_config: Dict[str, Any] = None
+    model: str, request=None, model_config: Optional[Dict[str, Any]] = None
 ) -> str:
     """将简化模型名 + generationConfig 参数解析为内部 MODEL_CONFIG key。
 
@@ -532,8 +571,8 @@ def resolve_model_name(
     # ────── 图片模型解析 ──────
     if model in IMAGE_BASE_MODELS:
         base = IMAGE_BASE_MODELS[model]
-        aspect_ratio, image_size = (
-            _extract_generation_params(request) if request else (None, None)
+        aspect_ratio, image_size, _duration = (
+            _extract_generation_params(request) if request else (None, None, None)
         )
 
         # 默认 aspect ratio
@@ -578,8 +617,8 @@ def resolve_model_name(
 
     # ────── 视频模型解析 ──────
     if model in VIDEO_BASE_MODELS:
-        aspect_ratio, image_size = (
-            _extract_generation_params(request) if request else (None, None)
+        aspect_ratio, image_size, duration = (
+            _extract_generation_params(request) if request else (None, None, None)
         )
 
         # 视频默认横屏
@@ -588,6 +627,17 @@ def resolve_model_name(
 
         if image_size in ("4k", "1080p") and f"{model}_{image_size}" in VIDEO_BASE_MODELS:
             model = f"{model}_{image_size}"
+
+        if model == "gemini-omni-flash":
+            seconds = duration if duration in OMNI_FLASH_DURATIONS else OMNI_FLASH_DEFAULT_DURATION
+            resolved = f"gemini-omni-flash-{seconds}s-{aspect_ratio}"
+            if model_config and resolved in model_config:
+                debug_logger.log_info(
+                    f"[MODEL_RESOLVER] Omni Flash 模型名转换: {model} → {resolved} "
+                    f"(aspectRatio={aspect_ratio}, duration={seconds}s)"
+                )
+                return resolved
+            return model
 
         orientation_map = VIDEO_BASE_MODELS[model]
         resolved = orientation_map.get(aspect_ratio)

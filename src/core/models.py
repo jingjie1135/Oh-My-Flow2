@@ -1,7 +1,7 @@
 """Data models for Flow2API"""
 
 from pydantic import BaseModel, ConfigDict
-from typing import Optional, List, Union, Any, Literal
+from typing import Optional, List, Union, Any, Literal, Dict
 from datetime import datetime
 
 
@@ -219,7 +219,7 @@ class ChatMessage(BaseModel):
     """Chat message"""
 
     role: str
-    content: Union[str, List[dict]]  # string or multimodal array
+    content: Union[str, List[Dict[str, Any]]]  # string or multimodal array
 
 
 class ImageConfig(BaseModel):
@@ -237,6 +237,8 @@ class GenerationConfigParam(BaseModel):
 
     responseModalities: Optional[List[str]] = None  # ["IMAGE", "TEXT"]
     imageConfig: Optional[ImageConfig] = None
+    duration: Optional[Union[int, str]] = None  # Gemini Omni Flash: 4, 6, 8, 10
+    aspectRatio: Optional[str] = None  # Video aliases may read this directly
 
     model_config = ConfigDict(extra="allow")
 

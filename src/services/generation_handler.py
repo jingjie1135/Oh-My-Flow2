@@ -4,7 +4,7 @@ import base64
 import json
 import time
 from pathlib import Path
-from typing import Optional, AsyncGenerator, List, Dict, Any
+from typing import Optional, AsyncGenerator, List, Dict, Any, cast
 from ..core.logger import debug_logger
 from ..core.config import config
 from ..core.monitoring import record_generation_result
@@ -20,7 +20,7 @@ from .file_cache import FileCache
 
 
 # Model configuration
-MODEL_CONFIG = {
+MODEL_CONFIG: Dict[str, Dict[str, Any]] = {
     # 图片生成 - GEM_PIX_2 (Gemini 3.0 Pro)
     "gemini-3.0-pro-image-landscape": {
         "type": "image",
@@ -727,6 +727,45 @@ def _make_i2v_config(
     return cfg
 
 
+OMNI_FLASH_DURATION_KEYS = {
+    4: "abra_r2v_4s",
+    6: "abra_r2v_6s",
+    8: "abra_r2v_8s",
+    10: "abra_r2v_10s",
+}
+
+OMNI_FLASH_CREDIT_COST = {4: 15, 6: 20, 8: 25, 10: 30}
+
+
+def _make_omni_flash_config(model_key: str, aspect_ratio: str) -> Dict[str, Any]:
+    return {
+        "type": "video",
+        "video_type": "r2v",
+        "model_key": model_key,
+        "aspect_ratio": aspect_ratio,
+        "supports_images": True,
+        "min_images": 1,
+        "max_images": 3,
+        "use_v2_model_config": True,
+        "allow_tier_upgrade": False,
+    }
+
+
+def _apply_gemini_omni_flash_model_updates():
+    landscape = "VIDEO_ASPECT_RATIO_LANDSCAPE"
+    portrait = "VIDEO_ASPECT_RATIO_PORTRAIT"
+
+    for seconds, model_key in OMNI_FLASH_DURATION_KEYS.items():
+        MODEL_CONFIG[f"gemini-omni-flash-{seconds}s-landscape"] = _make_omni_flash_config(
+            model_key,
+            landscape,
+        )
+        MODEL_CONFIG[f"gemini-omni-flash-{seconds}s-portrait"] = _make_omni_flash_config(
+            model_key,
+            portrait,
+        )
+
+
 def _apply_veo_3_1_model_updates():
     """Keep the public aliases aligned with the current Veo 3.1 model families."""
     landscape = "VIDEO_ASPECT_RATIO_LANDSCAPE"
@@ -897,15 +936,17 @@ def _apply_veo_3_1_model_updates():
     add_alias("veo_3_1_r2v_fast_landscape_ultra_1080p", "veo_3_1_r2v_fast_ultra_1080p")
 
 
+_apply_gemini_omni_flash_model_updates()
 _apply_veo_3_1_model_updates()
 
 
 def _known_video_model_keys() -> set[str]:
-    return {
-        cfg["model_key"]
-        for cfg in MODEL_CONFIG.values()
-        if cfg.get("type") == "video" and cfg.get("model_key")
-    }
+    keys: set[str] = set()
+    for cfg in MODEL_CONFIG.values():
+        model_key = cfg.get("model_key")
+        if cfg.get("type") == "video" and isinstance(model_key, str) and model_key:
+            keys.add(model_key)
+    return keys
 
 
 def _resolve_tier_two_model_key(model_key: str) -> str:
@@ -1031,7 +1072,7 @@ class GenerationHandler:
         stream: bool = False,
         base_url_override: Optional[str] = None,
         video_media_id: Optional[str] = None,
-    ) -> AsyncGenerator:
+    ) -> AsyncGenerator[str, None]:
         """统一生成入口
 
         Args:
@@ -1392,7 +1433,7 @@ class GenerationHandler:
         self,
         token,
         project_id: str,
-        model_config: dict,
+        model_config: Dict[str, Any],
         prompt: str,
         images: Optional[List[bytes]],
         stream: bool,
@@ -1401,7 +1442,7 @@ class GenerationHandler:
         response_state: Optional[Dict[str, Any]] = None,
         request_log_state: Optional[Dict[str, Any]] = None,
         pending_token_state: Optional[Dict[str, bool]] = None
-    ) -> AsyncGenerator:
+    ) -> AsyncGenerator[str, None]:
         """处理图片生成 (同步返回)"""
 
         if response_state is None:
@@ -1409,7 +1450,7 @@ class GenerationHandler:
 
         image_trace: Optional[Dict[str, Any]] = None
         if isinstance(perf_trace, dict):
-            image_trace = perf_trace.setdefault("image_generation", {})
+            image_trace = cast(Dict[str, Any], perf_trace.setdefault("image_generation", {}))
             image_trace["input_image_count"] = len(images) if images else 0
 
         # 不在本地等待图片硬并发槽位；请求一到就直接向上游提交。
@@ -1535,12 +1576,11 @@ class GenerationHandler:
                                 yield self._create_stream_chunk(f"✅ 图片已放大到 {resolution_name}\n")
 
                             # 2K/4K 图片统一落盘为真实文件，日志里只保留链接。
+                            upscaled_image: Dict[str, Any] = {"resolution": resolution_name}
                             response_state["generated_assets"] = {
                                 "type": "image",
                                 "origin_image_url": image_url,
-                                "upscaled_image": {
-                                    "resolution": resolution_name
-                                }
+                                "upscaled_image": upscaled_image,
                             }
 
                             try:
@@ -1555,8 +1595,8 @@ class GenerationHandler:
                                 cached_filename = await self.file_cache.cache_base64_image(encoded_image, resolution_name)
                                 local_url = f"{self._get_base_url(response_state)}/tmp/{cached_filename}"
                                 response_state["url"] = local_url
-                                response_state["generated_assets"]["upscaled_image"]["local_url"] = local_url
-                                response_state["generated_assets"]["upscaled_image"]["url"] = local_url
+                                upscaled_image["local_url"] = local_url
+                                upscaled_image["url"] = local_url
                                 self._mark_generation_succeeded(generation_result)
                                 if stream:
                                     yield self._create_stream_chunk(f"✅ {resolution_name} 图片缓存成功\n")
@@ -1575,9 +1615,9 @@ class GenerationHandler:
                             except Exception as e:
                                 debug_logger.log_error(f"Failed to cache {resolution_name} image: {str(e)}")
                                 response_state["url"] = image_url
-                                response_state["generated_assets"]["upscaled_image"]["local_url"] = None
-                                response_state["generated_assets"]["upscaled_image"]["url"] = image_url
-                                response_state["generated_assets"]["upscaled_image"]["delivery_mode"] = "inline_base64_fallback"
+                                upscaled_image["local_url"] = None
+                                upscaled_image["url"] = image_url
+                                upscaled_image["delivery_mode"] = "inline_base64_fallback"
                                 self._mark_generation_succeeded(generation_result)
                                 base64_url = f"data:image/jpeg;base64,{encoded_image}"
                                 if stream:
@@ -1675,7 +1715,7 @@ class GenerationHandler:
         self,
         token,
         project_id: str,
-        model_config: dict,
+        model_config: Dict[str, Any],
         prompt: str,
         images: Optional[List[bytes]],
         stream: bool,
@@ -1685,7 +1725,7 @@ class GenerationHandler:
         request_log_state: Optional[Dict[str, Any]] = None,
         pending_token_state: Optional[Dict[str, bool]] = None,
         video_media_id: Optional[str] = None,
-    ) -> AsyncGenerator:
+    ) -> AsyncGenerator[str, None]:
         """处理视频生成 (异步轮询)"""
 
         if response_state is None:
@@ -1693,7 +1733,7 @@ class GenerationHandler:
 
         video_trace: Optional[Dict[str, Any]] = None
         if isinstance(perf_trace, dict):
-            video_trace = perf_trace.setdefault("video_generation", {})
+            video_trace = cast(Dict[str, Any], perf_trace.setdefault("video_generation", {}))
             video_trace["input_image_count"] = len(images) if images else 0
 
         # 不在本地等待视频硬并发槽位；请求一到就直接向上游提交。
@@ -1754,6 +1794,14 @@ class GenerationHandler:
 
             # R2V: 多图生成 - 当前上游协议最多 3 张参考图
             elif video_type == "r2v":
+                if image_count < min_images:
+                    error_msg = f"❌ 多图视频模型至少需要 {min_images} 张参考图,当前提供了 {image_count} 张"
+                    if stream:
+                        yield self._create_stream_chunk(f"{error_msg}\n")
+                    self._mark_generation_failed(generation_result, error_msg)
+                    yield self._create_error_response(error_msg, status_code=400)
+                    return
+
                 if max_images is not None and image_count > max_images:
                     error_msg = f"❌ 多图视频模型最多支持 {max_images} 张参考图,当前提供了 {image_count} 张"
                     if stream:
@@ -1961,14 +2009,14 @@ class GenerationHandler:
         self,
         token,
         project_id: str,
-        operations: List[Dict],
+        operations: List[Dict[str, Any]],
         stream: bool,
-        upsample_config: Optional[Dict] = None,
+        upsample_config: Optional[Dict[str, Any]] = None,
         generation_result: Optional[Dict[str, Any]] = None,
         response_state: Optional[Dict[str, Any]] = None,
         request_log_state: Optional[Dict[str, Any]] = None,
         extend_source_media_id: Optional[str] = None,
-    ) -> AsyncGenerator:
+    ) -> AsyncGenerator[str, None]:
         """轮询视频生成结果
         
         Args:
@@ -2252,12 +2300,12 @@ class GenerationHandler:
 
     # ========== 响应格式化 ==========
 
-    def _create_stream_chunk(self, content: str, role: str = None, finish_reason: str = None) -> str:
+    def _create_stream_chunk(self, content: str, role: Optional[str] = None, finish_reason: Optional[str] = None) -> str:
         """创建流式响应chunk"""
         import json
         import time
 
-        chunk = {
+        chunk: Dict[str, Any] = {
             "id": f"chatcmpl-{int(time.time())}",
             "object": "chat.completion.chunk",
             "created": int(time.time()),

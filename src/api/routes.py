@@ -68,7 +68,7 @@ GEMINI_STATUS_MAP = {
 }
 
 # Dependency injection will be set up in main.py
-generation_handler: GenerationHandler = None
+generation_handler: Optional[GenerationHandler] = None
 
 
 @dataclass
@@ -384,7 +384,11 @@ async def _extract_prompt_and_images_from_gemini_contents(
             if not mime_type.startswith("image/"):
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Unsupported inlineData mime type: {part.inlineData.mimeType}",
+                    detail=(
+                        "Unsupported inlineData mime type for Flow2API media generation: "
+                        f"{part.inlineData.mimeType}. Gemini Omni Flash first-stage support "
+                        "accepts text plus image references only."
+                    ),
                 )
             images.append(base64.b64decode(part.inlineData.data))
         elif part.fileData is not None:
@@ -392,7 +396,11 @@ async def _extract_prompt_and_images_from_gemini_contents(
             if mime_type and not mime_type.startswith("image/"):
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Unsupported fileData mime type: {part.fileData.mimeType}",
+                    detail=(
+                        "Unsupported fileData mime type for Flow2API media generation: "
+                        f"{part.fileData.mimeType}. Gemini Omni Flash first-stage support "
+                        "accepts text plus image references only."
+                    ),
                 )
             images.append(await _load_image_bytes_from_uri(part.fileData.fileUri))
 
