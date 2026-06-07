@@ -14,7 +14,11 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..core.auth import AuthManager, verify_api_key_flexible
 from ..core.logger import debug_logger
-from ..core.model_resolver import get_base_model_aliases, resolve_model_name
+from ..core.model_resolver import (
+    get_base_model_aliases,
+    get_model_alias_metadata,
+    resolve_model_name,
+)
 from ..core.models import (
     ChatCompletionRequest,
     ChatMessage,
@@ -104,15 +108,61 @@ def _build_model_description(model_config: Dict[str, Any]) -> str:
     return description
 
 
-def _get_openai_model_catalog() -> List[Dict[str, str]]:
+def _build_model_metadata(model_id: str, model_config: Dict[str, Any]) -> Dict[str, Any]:
+    """Build catalog metadata for a concrete MODEL_CONFIG entry."""
+    metadata: Dict[str, Any] = {
+        "id": model_id,
+        "description": _build_model_description(model_config),
+        "is_alias": False,
+        "type": model_config.get("type"),
+        "supports_images": bool(model_config.get("supports_images", model_config.get("type") == "image")),
+    }
+    if model_config.get("type") == "image":
+        metadata.update(
+            {
+                "model_name": model_config.get("model_name"),
+                "aspect_ratio": model_config.get("aspect_ratio"),
+                "min_images": 0,
+                "max_images": 5,
+            }
+        )
+        if model_config.get("upsample"):
+            metadata["upsample"] = model_config.get("upsample")
+    else:
+        metadata.update(
+            {
+                "video_type": model_config.get("video_type"),
+                "model_key": model_config.get("model_key"),
+                "aspect_ratio": model_config.get("aspect_ratio"),
+                "min_images": model_config.get("min_images"),
+                "max_images": model_config.get("max_images"),
+                "requires_video_id": bool(model_config.get("requires_video_id", False)),
+            }
+        )
+        if model_config.get("upsample"):
+            metadata["upsample"] = model_config.get("upsample")
+    return metadata
+
+
+def _get_openai_model_catalog() -> List[Dict[str, Any]]:
     """Collect OpenAI-compatible model list entries."""
     return [
-        {
-            "id": model_id,
-            "description": _build_model_description(model_config),
-        }
+        _build_model_metadata(model_id, model_config)
         for model_id, model_config in MODEL_CONFIG.items()
     ]
+
+
+def _get_model_alias_catalog() -> List[Dict[str, Any]]:
+    """Collect parameter-selectable alias entries with capability metadata."""
+    catalog = []
+    descriptions = get_base_model_aliases()
+    for alias_id, metadata in get_model_alias_metadata().items():
+        item = dict(metadata)
+        item["id"] = alias_id
+        item["description"] = descriptions.get(alias_id, "Model alias")
+        item["owned_by"] = "flow2api"
+        catalog.append(item)
+    return catalog
 
 
 def _get_gemini_model_catalog() -> Dict[str, str]:
@@ -797,12 +847,7 @@ async def _iterate_gemini_stream(
 async def list_models(api_key: str = Depends(verify_api_key_flexible)):
     """List available models."""
     models = [
-        {
-            "id": model["id"],
-            "object": "model",
-            "owned_by": "flow2api",
-            "description": model["description"],
-        }
+        {**model, "object": "model", "owned_by": "flow2api"}
         for model in _get_openai_model_catalog()
     ]
 
@@ -812,18 +857,10 @@ async def list_models(api_key: str = Depends(verify_api_key_flexible)):
 @router.get("/v1/models/aliases")
 async def list_model_aliases(api_key: str = Depends(verify_api_key_flexible)):
     """List simplified model aliases for generationConfig-based resolution."""
-    aliases = get_base_model_aliases()
-    alias_models = []
-    for alias_id, description in aliases.items():
-        alias_models.append(
-            {
-                "id": alias_id,
-                "object": "model",
-                "owned_by": "flow2api",
-                "description": description,
-                "is_alias": True,
-            }
-        )
+    alias_models = [
+        {**model, "object": "model", "owned_by": "flow2api"}
+        for model in _get_model_alias_catalog()
+    ]
     return {"object": "list", "data": alias_models}
 
 
