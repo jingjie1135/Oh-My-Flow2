@@ -4,7 +4,7 @@ import base64
 import json
 import time
 from pathlib import Path
-from typing import Optional, AsyncGenerator, List, Dict, Any, cast
+from typing import Optional, AsyncGenerator, List, Dict, Any, Tuple, cast
 from ..core.logger import debug_logger
 from ..core.config import config
 from ..core.monitoring import record_generation_result
@@ -1009,6 +1009,37 @@ class GenerationHandler:
         if len(text) <= max_length:
             return text
         return f"{text[:max_length - 3]}..."
+
+    def _find_nested_string(self, value: Any, keys: Tuple[str, ...]) -> Optional[str]:
+        if isinstance(value, dict):
+            for key in keys:
+                candidate = value.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+            for child in value.values():
+                found = self._find_nested_string(child, keys)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for child in value:
+                found = self._find_nested_string(child, keys)
+                if found:
+                    return found
+        return None
+
+    def _extract_video_url_from_info(self, video_info: Dict[str, Any]) -> Optional[str]:
+        candidates = (
+            self._find_nested_string(video_info, ("fifeUrl", "videoUrl", "outputUri", "downloadUri")),
+            self._find_nested_string(video_info, ("uri", "url")),
+        )
+        for candidate in candidates:
+            if candidate and (
+                candidate.startswith("http://")
+                or candidate.startswith("https://")
+                or candidate.startswith("/")
+            ):
+                return candidate
+        return None
 
     def _resolve_video_model_key_for_tier(self, model_config: Dict[str, Any], user_tier: str) -> tuple[str, Optional[str]]:
         """根据账号层级调整视频模型 key。"""
@@ -2064,7 +2095,7 @@ class GenerationHandler:
                     # 成功
                     metadata = operation["operation"].get("metadata", {})
                     video_info = metadata.get("video", {})
-                    video_url = video_info.get("fifeUrl")
+                    video_url = self._extract_video_url_from_info(video_info)
                     # Extract short UUID from Google Storage URL (e.g., /video/UUID?)
                     # Both extend API and concat API need this short UUID format,
                     # NOT the CAUS base64 mediaGenerationId from video_info

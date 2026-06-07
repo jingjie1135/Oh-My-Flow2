@@ -14,6 +14,7 @@ from src.core.account_tiers import (
     get_required_paygate_tier_for_model,
     supports_model_for_tier,
 )
+from src.core.config import config
 from src.core.model_resolver import resolve_model_name
 from src.core.models import GeminiContent, GeminiInlineData, GeminiPart
 from src.services.flow_client import FlowClient
@@ -189,6 +190,73 @@ class GeminiOmniFlashValidationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["aspect_ratio"], "VIDEO_ASPECT_RATIO_LANDSCAPE")
         self.assertEqual(kwargs["prompt"], "生成视频")
         self.assertEqual(chunks[-1], {"ok": True})
+
+    async def test_poll_accepts_successful_nested_video_url_field(self):
+        original_flow_config = dict(config._config["flow"])
+        original_cache_config = (
+            dict(config._config["cache"]) if "cache" in config._config else None
+        )
+        video_url = (
+            "https://flow-content.google/video/"
+            "11111111-1111-1111-1111-111111111111?token=abc"
+        )
+        handler = GenerationHandler.__new__(GenerationHandler)
+        handler.flow_client = types.SimpleNamespace(
+            check_video_status=AsyncMock(
+                return_value={
+                    "operations": [
+                        {
+                            "operation": {
+                                "name": "task-omni-url",
+                                "metadata": {
+                                    "video": {
+                                        "generatedVideo": {
+                                            "videoUrl": video_url,
+                                            "aspectRatio": "VIDEO_ASPECT_RATIO_PORTRAIT",
+                                        }
+                                    }
+                                },
+                            },
+                            "status": "MEDIA_GENERATION_STATUS_SUCCESSFUL",
+                        }
+                    ]
+                }
+            )
+        )
+        handler.db = types.SimpleNamespace(update_task=AsyncMock())
+        token = types.SimpleNamespace(id=1, at="at-token", video_concurrency=-1)
+        generation_result = handler._create_generation_result()
+        response_state = handler._create_response_state()
+
+        try:
+            config._config["flow"]["poll_interval"] = 0
+            config._config["flow"]["max_poll_attempts"] = 1
+            config.set_cache_enabled(False)
+
+            chunks = []
+            async for chunk in handler._poll_video_result(
+                token=token,
+                project_id="project-1",
+                operations=[
+                    {"operation": {"name": "task-omni-url"}, "projectId": "project-1"}
+                ],
+                stream=False,
+                generation_result=generation_result,
+                response_state=response_state,
+                request_log_state={},
+            ):
+                chunks.append(json.loads(chunk))
+        finally:
+            config._config["flow"] = original_flow_config
+            if original_cache_config is None:
+                config._config.pop("cache", None)
+            else:
+                config._config["cache"] = original_cache_config
+
+        self.assertTrue(generation_result["success"])
+        self.assertEqual(response_state["url"], video_url)
+        handler.db.update_task.assert_awaited_once()
+        self.assertIn(video_url, chunks[-1]["choices"][0]["message"]["content"])
 
 
 class GeminiOmniFlashFlowClientTests(unittest.IsolatedAsyncioTestCase):
