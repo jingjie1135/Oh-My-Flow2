@@ -12,7 +12,7 @@ Example:
 """
 
 import re
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 from ..core.logger import debug_logger
 
 # ──────────────────────────────────────────────
@@ -301,6 +301,334 @@ VIDEO_BASE_MODELS = {
 }
 
 
+def _aspect_pair(landscape: str, portrait: str) -> Dict[str, str]:
+    return {"landscape": landscape, "portrait": portrait}
+
+
+def _video_selector(
+    video_type: str,
+    variants: Dict[Tuple[Optional[int], Optional[str]], Dict[str, str]],
+    *,
+    durations: Optional[List[int]] = None,
+    resolutions: Optional[List[str]] = None,
+    min_images: Optional[int] = None,
+    max_images: Optional[int] = None,
+    supports_images: bool = False,
+    requires_video_id: bool = False,
+    default_duration: Optional[int] = None,
+) -> Dict[str, Any]:
+    return {
+        "type": "video",
+        "video_type": video_type,
+        "aspects": ["landscape", "portrait"],
+        "durations": durations or [],
+        "resolutions": resolutions or [],
+        "min_images": min_images,
+        "max_images": max_images,
+        "supports_images": supports_images,
+        "requires_video_id": requires_video_id,
+        "default_duration": default_duration,
+        "variants": variants,
+    }
+
+
+VIDEO_ALIAS_SELECTORS: Dict[str, Dict[str, Any]] = {
+    "veo_3_1_t2v_fast": _video_selector(
+        "t2v",
+        {
+            (None, None): _aspect_pair("veo_3_1_t2v_fast_landscape", "veo_3_1_t2v_fast_portrait"),
+            (4, None): _aspect_pair("veo_3_1_t2v_fast_4s", "veo_3_1_t2v_fast_portrait_4s"),
+            (6, None): _aspect_pair("veo_3_1_t2v_fast_6s", "veo_3_1_t2v_fast_portrait_6s"),
+            (None, "4k"): _aspect_pair("veo_3_1_t2v_fast_4k", "veo_3_1_t2v_fast_portrait_4k"),
+            (None, "1080p"): _aspect_pair("veo_3_1_t2v_fast_1080p", "veo_3_1_t2v_fast_portrait_1080p"),
+        },
+        durations=[4, 6],
+        resolutions=["1080p", "4k"],
+    ),
+    "veo_3_1_t2v_fast_ultra": _video_selector(
+        "t2v",
+        {
+            (None, None): _aspect_pair("veo_3_1_t2v_fast_ultra", "veo_3_1_t2v_fast_portrait_ultra"),
+            (None, "4k"): _aspect_pair("veo_3_1_t2v_fast_ultra_4k", "veo_3_1_t2v_fast_portrait_ultra_4k"),
+            (None, "1080p"): _aspect_pair("veo_3_1_t2v_fast_ultra_1080p", "veo_3_1_t2v_fast_portrait_ultra_1080p"),
+        },
+        resolutions=["1080p", "4k"],
+    ),
+    "veo_3_1_t2v_fast_ultra_relaxed": _video_selector(
+        "t2v",
+        {
+            (None, None): _aspect_pair(
+                "veo_3_1_t2v_fast_ultra_relaxed",
+                "veo_3_1_t2v_fast_portrait_ultra_relaxed",
+            )
+        },
+    ),
+    "veo_3_1_t2v": _video_selector(
+        "t2v",
+        {
+            (None, None): _aspect_pair("veo_3_1_t2v_landscape", "veo_3_1_t2v_portrait"),
+            (4, None): _aspect_pair("veo_3_1_t2v_4s", "veo_3_1_t2v_portrait_4s"),
+            (6, None): _aspect_pair("veo_3_1_t2v_6s", "veo_3_1_t2v_portrait_6s"),
+            (None, "4k"): _aspect_pair("veo_3_1_t2v_4k", "veo_3_1_t2v_portrait_4k"),
+            (None, "1080p"): _aspect_pair("veo_3_1_t2v_1080p", "veo_3_1_t2v_portrait_1080p"),
+            (4, "4k"): _aspect_pair("veo_3_1_t2v_4s_4k", "veo_3_1_t2v_portrait_4s_4k"),
+            (4, "1080p"): _aspect_pair("veo_3_1_t2v_4s_1080p", "veo_3_1_t2v_portrait_4s_1080p"),
+            (6, "4k"): _aspect_pair("veo_3_1_t2v_6s_4k", "veo_3_1_t2v_portrait_6s_4k"),
+            (6, "1080p"): _aspect_pair("veo_3_1_t2v_6s_1080p", "veo_3_1_t2v_portrait_6s_1080p"),
+        },
+        durations=[4, 6],
+        resolutions=["1080p", "4k"],
+    ),
+    "veo_3_1_t2v_lite": _video_selector(
+        "t2v",
+        {
+            (None, None): _aspect_pair("veo_3_1_t2v_lite_landscape", "veo_3_1_t2v_lite_portrait"),
+            (4, None): _aspect_pair("veo_3_1_t2v_lite_4s_landscape", "veo_3_1_t2v_lite_4s_portrait"),
+            (6, None): _aspect_pair("veo_3_1_t2v_lite_6s_landscape", "veo_3_1_t2v_lite_6s_portrait"),
+        },
+        durations=[4, 6],
+    ),
+    "veo_3_1_i2v_s_fast_fl": _video_selector(
+        "i2v",
+        {
+            (None, None): _aspect_pair("veo_3_1_i2v_s_fast_fl", "veo_3_1_i2v_s_fast_portrait_fl"),
+            (4, None): _aspect_pair("veo_3_1_i2v_s_fast_4s_fl", "veo_3_1_i2v_s_fast_portrait_4s_fl"),
+            (6, None): _aspect_pair("veo_3_1_i2v_s_fast_6s_fl", "veo_3_1_i2v_s_fast_portrait_6s_fl"),
+        },
+        durations=[4, 6],
+        supports_images=True,
+        min_images=1,
+        max_images=2,
+    ),
+    "veo_3_1_i2v_s_fast_ultra_fl": _video_selector(
+        "i2v",
+        {
+            (None, None): _aspect_pair("veo_3_1_i2v_s_fast_ultra_fl", "veo_3_1_i2v_s_fast_portrait_ultra_fl"),
+            (None, "4k"): _aspect_pair("veo_3_1_i2v_s_fast_ultra_fl_4k", "veo_3_1_i2v_s_fast_portrait_ultra_fl_4k"),
+            (None, "1080p"): _aspect_pair("veo_3_1_i2v_s_fast_ultra_fl_1080p", "veo_3_1_i2v_s_fast_portrait_ultra_fl_1080p"),
+        },
+        resolutions=["1080p", "4k"],
+        supports_images=True,
+        min_images=1,
+        max_images=2,
+    ),
+    "veo_3_1_i2v_s_fast_ultra_relaxed": _video_selector(
+        "i2v",
+        {
+            (None, None): _aspect_pair(
+                "veo_3_1_i2v_s_fast_ultra_relaxed",
+                "veo_3_1_i2v_s_fast_portrait_ultra_relaxed",
+            )
+        },
+        supports_images=True,
+        min_images=1,
+        max_images=2,
+    ),
+    "veo_3_1_i2v_s": _video_selector(
+        "i2v",
+        {
+            (None, None): _aspect_pair("veo_3_1_i2v_s_landscape", "veo_3_1_i2v_s_portrait"),
+            (4, None): _aspect_pair("veo_3_1_i2v_s_4s", "veo_3_1_i2v_s_portrait_4s"),
+            (6, None): _aspect_pair("veo_3_1_i2v_s_6s", "veo_3_1_i2v_s_portrait_6s"),
+            (None, "4k"): _aspect_pair("veo_3_1_i2v_s_4k", "veo_3_1_i2v_s_portrait_4k"),
+            (None, "1080p"): _aspect_pair("veo_3_1_i2v_s_1080p", "veo_3_1_i2v_s_portrait_1080p"),
+            (4, "4k"): _aspect_pair("veo_3_1_i2v_s_4s_4k", "veo_3_1_i2v_s_portrait_4s_4k"),
+            (4, "1080p"): _aspect_pair("veo_3_1_i2v_s_4s_1080p", "veo_3_1_i2v_s_portrait_4s_1080p"),
+            (6, "4k"): _aspect_pair("veo_3_1_i2v_s_6s_4k", "veo_3_1_i2v_s_portrait_6s_4k"),
+            (6, "1080p"): _aspect_pair("veo_3_1_i2v_s_6s_1080p", "veo_3_1_i2v_s_portrait_6s_1080p"),
+        },
+        durations=[4, 6],
+        resolutions=["1080p", "4k"],
+        supports_images=True,
+        min_images=1,
+        max_images=2,
+    ),
+    "veo_3_1_i2v_lite": _video_selector(
+        "i2v",
+        {
+            (None, None): _aspect_pair("veo_3_1_i2v_lite_landscape", "veo_3_1_i2v_lite_portrait"),
+            (4, None): _aspect_pair("veo_3_1_i2v_lite_4s_landscape", "veo_3_1_i2v_lite_4s_portrait"),
+            (6, None): _aspect_pair("veo_3_1_i2v_lite_6s_landscape", "veo_3_1_i2v_lite_6s_portrait"),
+        },
+        durations=[4, 6],
+        supports_images=True,
+        min_images=1,
+        max_images=1,
+    ),
+    "veo_3_1_interpolation_lite": _video_selector(
+        "i2v",
+        {
+            (None, None): _aspect_pair("veo_3_1_interpolation_lite_landscape", "veo_3_1_interpolation_lite_portrait"),
+            (4, None): _aspect_pair("veo_3_1_interpolation_lite_4s_landscape", "veo_3_1_interpolation_lite_4s_portrait"),
+            (6, None): _aspect_pair("veo_3_1_interpolation_lite_6s_landscape", "veo_3_1_interpolation_lite_6s_portrait"),
+        },
+        durations=[4, 6],
+        supports_images=True,
+        min_images=2,
+        max_images=2,
+    ),
+    "veo_3_1_r2v_fast": _video_selector(
+        "r2v",
+        {(None, None): _aspect_pair("veo_3_1_r2v_fast", "veo_3_1_r2v_fast_portrait")},
+        supports_images=True,
+        min_images=0,
+        max_images=3,
+    ),
+    "veo_3_1_r2v_fast_ultra": _video_selector(
+        "r2v",
+        {
+            (None, None): _aspect_pair("veo_3_1_r2v_fast_ultra", "veo_3_1_r2v_fast_portrait_ultra"),
+            (None, "4k"): _aspect_pair("veo_3_1_r2v_fast_ultra_4k", "veo_3_1_r2v_fast_portrait_ultra_4k"),
+            (None, "1080p"): _aspect_pair("veo_3_1_r2v_fast_ultra_1080p", "veo_3_1_r2v_fast_portrait_ultra_1080p"),
+        },
+        resolutions=["1080p", "4k"],
+        supports_images=True,
+        min_images=0,
+        max_images=3,
+    ),
+    "veo_3_1_r2v_fast_ultra_relaxed": _video_selector(
+        "r2v",
+        {
+            (None, None): _aspect_pair(
+                "veo_3_1_r2v_fast_ultra_relaxed",
+                "veo_3_1_r2v_fast_portrait_ultra_relaxed",
+            )
+        },
+        supports_images=True,
+        min_images=0,
+        max_images=3,
+    ),
+    "gemini-omni-flash": _video_selector(
+        "r2v",
+        {
+            (4, None): _aspect_pair("gemini-omni-flash-4s-landscape", "gemini-omni-flash-4s-portrait"),
+            (6, None): _aspect_pair("gemini-omni-flash-6s-landscape", "gemini-omni-flash-6s-portrait"),
+            (8, None): _aspect_pair("gemini-omni-flash-8s-landscape", "gemini-omni-flash-8s-portrait"),
+            (10, None): _aspect_pair("gemini-omni-flash-10s-landscape", "gemini-omni-flash-10s-portrait"),
+        },
+        durations=[4, 6, 8, 10],
+        supports_images=True,
+        min_images=1,
+        max_images=3,
+        default_duration=OMNI_FLASH_DEFAULT_DURATION,
+    ),
+    "veo_3_1_extend": _video_selector(
+        "extend",
+        {(None, None): _aspect_pair("veo_3_1_extend", "veo_3_1_extend_portrait")},
+        requires_video_id=True,
+    ),
+}
+
+
+def _infer_video_alias_metadata(alias: str) -> Dict[str, Any]:
+    if "r2v" in alias:
+        video_type = "r2v"
+        supports_images = True
+        min_images = 0
+        max_images = 3
+    elif "interpolation" in alias:
+        video_type = "i2v"
+        supports_images = True
+        min_images = 2
+        max_images = 2
+    elif "i2v" in alias:
+        video_type = "i2v"
+        supports_images = True
+        min_images = 1
+        max_images = 1 if "i2v_lite" in alias else 2
+    elif "extend" in alias:
+        video_type = "extend"
+        supports_images = False
+        min_images = None
+        max_images = None
+    else:
+        video_type = "t2v"
+        supports_images = False
+        min_images = None
+        max_images = None
+
+    durations = []
+    for seconds in (4, 6, 8, 10):
+        if f"_{seconds}s" in alias or f"-{seconds}s" in alias:
+            durations.append(seconds)
+
+    resolutions = []
+    for resolution in ("1080p", "4k"):
+        if resolution in alias:
+            resolutions.append(resolution)
+
+    return {
+        "type": "video",
+        "video_type": video_type,
+        "aspects": list(VIDEO_BASE_MODELS.get(alias, {}).keys()) or ["landscape", "portrait"],
+        "durations": durations,
+        "resolutions": resolutions,
+        "supports_images": supports_images,
+        "min_images": min_images,
+        "max_images": max_images,
+        "requires_video_id": "extend" in alias,
+    }
+
+
+def _select_video_variant(
+    selector: Dict[str, Any],
+    aspect_ratio: str,
+    duration: Optional[int],
+    resolution: Optional[str],
+) -> Optional[str]:
+    durations = selector.get("durations") or []
+    resolutions = selector.get("resolutions") or []
+    default_duration = selector.get("default_duration")
+    selected_duration = duration if duration in durations else default_duration
+    selected_resolution = resolution if resolution in resolutions else None
+    variants = selector.get("variants") or {}
+
+    for key in (
+        (selected_duration, selected_resolution),
+        (selected_duration, None),
+        (None, selected_resolution),
+        (None, None),
+    ):
+        aspect_map = variants.get(key)
+        if aspect_map and aspect_ratio in aspect_map:
+            return aspect_map[aspect_ratio]
+    return None
+
+
+def get_model_alias_metadata() -> Dict[str, Dict[str, Any]]:
+    """返回所有简化模型别名及其可选参数能力，用于目录和测试页。"""
+    aliases: Dict[str, Dict[str, Any]] = {}
+
+    for alias, base in IMAGE_BASE_MODELS.items():
+        aliases[alias] = {
+            "id": alias,
+            "type": "image",
+            "is_alias": True,
+            "aspects": MODEL_SUPPORTED_ASPECTS.get(base, []),
+            "sizes": MODEL_SUPPORTED_SIZES.get(base, []),
+            "supports_images": True,
+            "min_images": 0,
+            "max_images": 5,
+            "default_model": f"{base}-{DEFAULT_ASPECT}",
+        }
+
+    for alias in VIDEO_BASE_MODELS:
+        selector = VIDEO_ALIAS_SELECTORS.get(alias)
+        meta = dict(selector) if selector else _infer_video_alias_metadata(alias)
+        meta.pop("variants", None)
+        meta.pop("default_duration", None)
+        default_target = _select_video_variant(
+            selector,
+            "landscape",
+            selector.get("default_duration") if selector else None,
+            None,
+        ) if selector else VIDEO_BASE_MODELS[alias].get("landscape")
+        meta.update({"id": alias, "is_alias": True, "default_model": default_target})
+        aliases[alias] = meta
+
+    return aliases
+
+
 def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str], Optional[int]]:
     """从请求中提取 aspectRatio、imageSize 和 duration 参数。
 
@@ -475,7 +803,14 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str], O
             )
         if not image_size:
             image_size = _normalize_image_size(
-                _read_value(gen_config, "imageSize", "image_size")
+                _read_value(
+                    gen_config,
+                    "imageSize",
+                    "image_size",
+                    "resolution",
+                    "videoResolution",
+                    "video_resolution",
+                )
             )
 
         if not aspect_ratio:
@@ -517,7 +852,11 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str], O
                 )
             if image_size is None:
                 image_size = _normalize_image_size(
-                    gen_config_raw.get("imageSize") or gen_config_raw.get("image_size")
+                    gen_config_raw.get("imageSize")
+                    or gen_config_raw.get("image_size")
+                    or gen_config_raw.get("resolution")
+                    or gen_config_raw.get("videoResolution")
+                    or gen_config_raw.get("video_resolution")
                 )
 
             if aspect_ratio is None:
@@ -537,7 +876,13 @@ def _extract_generation_params(request) -> Tuple[Optional[str], Optional[str], O
         if aspect_ratio is None:
             aspect_ratio = _normalize_aspect_ratio(extra.get("aspect_ratio") or extra.get("aspectRatio"))
         if image_size is None:
-            image_size = _normalize_image_size(extra.get("image_size") or extra.get("imageSize"))
+            image_size = _normalize_image_size(
+                extra.get("image_size")
+                or extra.get("imageSize")
+                or extra.get("resolution")
+                or extra.get("videoResolution")
+                or extra.get("video_resolution")
+            )
 
         if duration is None:
             duration = _normalize_duration(
@@ -625,19 +970,19 @@ def resolve_model_name(
         if not aspect_ratio or aspect_ratio not in ("landscape", "portrait"):
             aspect_ratio = "landscape"
 
-        if image_size in ("4k", "1080p") and f"{model}_{image_size}" in VIDEO_BASE_MODELS:
-            model = f"{model}_{image_size}"
-
-        if model == "gemini-omni-flash":
-            seconds = duration if duration in OMNI_FLASH_DURATIONS else OMNI_FLASH_DEFAULT_DURATION
-            resolved = f"gemini-omni-flash-{seconds}s-{aspect_ratio}"
+        selector = VIDEO_ALIAS_SELECTORS.get(model)
+        if selector:
+            resolved = _select_video_variant(selector, aspect_ratio, duration, image_size)
             if model_config and resolved in model_config:
                 debug_logger.log_info(
-                    f"[MODEL_RESOLVER] Omni Flash 模型名转换: {model} → {resolved} "
-                    f"(aspectRatio={aspect_ratio}, duration={seconds}s)"
+                    f"[MODEL_RESOLVER] 视频模型名转换: {model} → {resolved} "
+                    f"(aspectRatio={aspect_ratio}, duration={duration or 'default'}, "
+                    f"resolution={image_size or 'default'})"
                 )
                 return resolved
-            return model
+
+        if image_size in ("4k", "1080p") and f"{model}_{image_size}" in VIDEO_BASE_MODELS:
+            model = f"{model}_{image_size}"
 
         orientation_map = VIDEO_BASE_MODELS[model]
         resolved = orientation_map.get(aspect_ratio)
@@ -667,17 +1012,22 @@ def get_base_model_aliases() -> Dict[str, str]:
     """返回所有简化模型名（别名）及其描述，用于 /v1/models 接口展示。"""
     aliases = {}
 
-    for alias, base in IMAGE_BASE_MODELS.items():
-        aspects = MODEL_SUPPORTED_ASPECTS.get(base, [])
-        sizes = MODEL_SUPPORTED_SIZES.get(base, [])
-        desc_parts = [f"aspects: {', '.join(aspects)}"]
-        if sizes:
-            desc_parts.append(f"sizes: {', '.join(sizes)}")
-        aliases[alias] = f"Image generation (alias) - {'; '.join(desc_parts)}"
+    for alias, meta in get_model_alias_metadata().items():
+        if meta.get("type") == "image":
+            desc_parts = [f"aspects: {', '.join(meta.get('aspects') or [])}"]
+            sizes = meta.get("sizes") or []
+            if sizes:
+                desc_parts.append(f"sizes: {', '.join(sizes)}")
+            aliases[alias] = f"Image generation (alias) - {'; '.join(desc_parts)}"
+            continue
 
-    for alias in VIDEO_BASE_MODELS:
-        aliases[alias] = (
-            "Video generation (alias) - supports landscape/portrait via generationConfig"
-        )
+        desc_parts = ["supports landscape/portrait via generationConfig"]
+        durations = meta.get("durations") or []
+        resolutions = meta.get("resolutions") or []
+        if durations:
+            desc_parts.append(f"durations: {', '.join(str(item) + 's' for item in durations)}")
+        if resolutions:
+            desc_parts.append(f"resolutions: {', '.join(resolutions)}")
+        aliases[alias] = f"Video generation (alias) - {'; '.join(desc_parts)}"
 
     return aliases
