@@ -179,6 +179,7 @@ Prometheus 可直接抓 `/metrics`。如果部署到 Kubernetes，建议只在�
 访问 **http://localhost:8000/test** 可打开内置的模型测试页面，支持：
 
 - 按分类浏览所有可用模型（图片生成、文/图生视频、多图视频、视频放大等）
+- 显示参数自动选择 Alias，并可在页面选择宽高比、时长、图片清晰度或视频输出分辨率
 - 输入提示词一键测试，流式显示生成进度
 - 图生图 / 图生视频场景支持上传图片
 - 生成完成后直接预览图片或视频
@@ -393,6 +394,11 @@ Prometheus 可直接抓 `/metrics`。如果部署到 Kubernetes，建议只在�
 > - `generationConfig.imageConfig.aspectRatio`
 > - `generationConfig.imageConfig.imageSize`
 > - `generationConfig.duration` / `generationConfig.videoDuration`（视频别名解析）
+> - `generationConfig.resolution` / `generationConfig.videoResolution`（视频放大别名解析）
+>
+> 模型目录：
+> - `GET /v1/models` 返回具体可调用模型，并带有 `type`、`video_type`、图片数量限制等元数据。
+> - `GET /v1/models/aliases` 返回可按参数自动选择具体变体的 Alias，并带有支持的 `aspects`、`durations`、`sizes`、`resolutions` 等元数据。
 
 ### Gemini 官方 generateContent（文生图）
 
