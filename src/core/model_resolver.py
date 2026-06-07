@@ -508,7 +508,7 @@ VIDEO_ALIAS_SELECTORS: Dict[str, Dict[str, Any]] = {
         },
         durations=[4, 6, 8, 10],
         supports_images=True,
-        min_images=1,
+        min_images=0,
         max_images=3,
         default_duration=OMNI_FLASH_DEFAULT_DURATION,
     ),

@@ -88,7 +88,7 @@ class GeminiOmniFlashModelConfigTests(unittest.TestCase):
                 self.assertEqual(cfg["video_type"], "r2v")
                 self.assertEqual(cfg["model_key"], model_key)
                 self.assertTrue(cfg["supports_images"])
-                self.assertEqual(cfg["min_images"], 1)
+                self.assertEqual(cfg["min_images"], 0)
                 self.assertEqual(cfg["max_images"], 3)
                 self.assertTrue(cfg["use_v2_model_config"])
                 self.assertFalse(cfg["allow_tier_upgrade"])
@@ -118,19 +118,32 @@ class GeminiOmniFlashTierTests(unittest.TestCase):
 
 
 class GeminiOmniFlashValidationTests(unittest.IsolatedAsyncioTestCase):
-    def test_omni_requires_at_least_one_reference_image(self):
+    def test_omni_allows_optional_reference_images(self):
         cfg = MODEL_CONFIG["gemini-omni-flash-4s-landscape"]
 
         self.assertEqual(cfg["video_type"], "r2v")
-        self.assertEqual(cfg["min_images"], 1)
+        self.assertEqual(cfg["min_images"], 0)
         self.assertEqual(cfg["max_images"], 3)
 
-    async def test_omni_without_reference_images_returns_400_before_text_video(self):
+    async def test_omni_without_reference_images_uses_text_video(self):
         handler = GenerationHandler.__new__(GenerationHandler)
         handler.flow_client = types.SimpleNamespace(
-            generate_video_text=AsyncMock(return_value={"operations": []})
+            generate_video_text=AsyncMock(
+                return_value={
+                    "operations": [
+                        {
+                            "operation": {"name": "task-omni-text"},
+                            "sceneId": "scene-1",
+                        }
+                    ]
+                }
+            )
         )
         handler._update_request_log_progress = AsyncMock()
+        handler._resolve_video_model_key_for_tier = GenerationHandler._resolve_video_model_key_for_tier.__get__(
+            handler,
+            GenerationHandler,
+        )
         handler._mark_generation_failed = GenerationHandler._mark_generation_failed.__get__(
             handler,
             GenerationHandler,
@@ -139,6 +152,15 @@ class GeminiOmniFlashValidationTests(unittest.IsolatedAsyncioTestCase):
             handler,
             GenerationHandler,
         )
+        handler._create_stream_chunk = GenerationHandler._create_stream_chunk.__get__(
+            handler,
+            GenerationHandler,
+        )
+        async def fake_poll_video_result(*args, **kwargs):
+            yield json.dumps({"ok": True})
+
+        handler._poll_video_result = fake_poll_video_result
+        handler.db = types.SimpleNamespace(create_task=AsyncMock())
 
         token = types.SimpleNamespace(
             id=1,
@@ -161,9 +183,12 @@ class GeminiOmniFlashValidationTests(unittest.IsolatedAsyncioTestCase):
         ):
             chunks.append(json.loads(chunk))
 
-        self.assertEqual(chunks[-1]["error"]["status_code"], 400)
-        self.assertIn("至少需要 1 张参考图", chunks[-1]["error"]["message"])
-        handler.flow_client.generate_video_text.assert_not_called()
+        handler.flow_client.generate_video_text.assert_awaited_once()
+        kwargs = handler.flow_client.generate_video_text.await_args.kwargs
+        self.assertEqual(kwargs["model_key"], "abra_r2v_4s")
+        self.assertEqual(kwargs["aspect_ratio"], "VIDEO_ASPECT_RATIO_LANDSCAPE")
+        self.assertEqual(kwargs["prompt"], "生成视频")
+        self.assertEqual(chunks[-1], {"ok": True})
 
 
 class GeminiOmniFlashFlowClientTests(unittest.IsolatedAsyncioTestCase):

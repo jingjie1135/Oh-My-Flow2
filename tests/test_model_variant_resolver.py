@@ -79,7 +79,7 @@ class ModelVariantResolverTests(unittest.TestCase):
 
         self.assertEqual(metadata["gemini-omni-flash"]["video_type"], "r2v")
         self.assertEqual(metadata["gemini-omni-flash"]["durations"], [4, 6, 8, 10])
-        self.assertEqual(metadata["gemini-omni-flash"]["min_images"], 1)
+        self.assertEqual(metadata["gemini-omni-flash"]["min_images"], 0)
         self.assertEqual(metadata["gemini-omni-flash"]["max_images"], 3)
 
 

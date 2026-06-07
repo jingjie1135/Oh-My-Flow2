@@ -744,7 +744,7 @@ def _make_omni_flash_config(model_key: str, aspect_ratio: str) -> Dict[str, Any]
         "model_key": model_key,
         "aspect_ratio": aspect_ratio,
         "supports_images": True,
-        "min_images": 1,
+        "min_images": 0,
         "max_images": 3,
         "use_v2_model_config": True,
         "allow_tier_upgrade": False,

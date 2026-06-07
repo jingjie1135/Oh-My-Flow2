@@ -12,7 +12,7 @@ class ModelCatalogMetadataTests(unittest.TestCase):
         self.assertEqual(omni["type"], "video")
         self.assertEqual(omni["video_type"], "r2v")
         self.assertTrue(omni["supports_images"])
-        self.assertEqual(omni["min_images"], 1)
+        self.assertEqual(omni["min_images"], 0)
         self.assertEqual(omni["max_images"], 3)
 
     def test_alias_catalog_exposes_omni_variant_parameters(self):
@@ -23,7 +23,7 @@ class ModelCatalogMetadataTests(unittest.TestCase):
         self.assertEqual(omni["video_type"], "r2v")
         self.assertEqual(omni["durations"], [4, 6, 8, 10])
         self.assertEqual(omni["aspects"], ["landscape", "portrait"])
-        self.assertEqual(omni["min_images"], 1)
+        self.assertEqual(omni["min_images"], 0)
         self.assertEqual(omni["max_images"], 3)
 
     def test_alias_catalog_exposes_interpolation_and_extend_capabilities(self):

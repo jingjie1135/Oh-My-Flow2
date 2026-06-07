@@ -305,7 +305,7 @@ Prometheus 可直接抓 `/metrics`。如果部署到 Kubernetes，建议只在�
 > - 横屏 / 竖屏 `R2V` 模型共用同一套新版请求体
 > - 横屏 `R2V` 的上游 `videoModelKey` 已切换为 `*_landscape` 形式
 > - 根据当前上游协议，`referenceImages` 当前最多传 **3 张**
-> - `gemini-omni-flash` 第一阶段按 R2V 接入：必须提供 **1-3 张参考图**，支持 `duration` 为 `4` / `6` / `8` / `10` 秒，支持 `16:9` / `9:16`
+> - `gemini-omni-flash` 第一阶段按 R2V 接入：参考图可选，支持 **0-3 张参考图**，支持 `duration` 为 `4` / `6` / `8` / `10` 秒，支持 `16:9` / `9:16`
 
 | 模型名称 | 说明| 尺寸 |
 |---------|---------|--------|
@@ -504,7 +504,7 @@ curl -X POST "http://localhost:8000/v1/chat/completions" \
 
 ### Gemini 官方 generateContent（Gemini Omni Flash R2V）
 
-> 第一阶段支持文本 + 图片参考的 R2V 调用；音频/视频输入、对话式视频编辑、首尾帧等能力暂未在本项目中接入。
+> 第一阶段支持纯文本或文本 + 图片参考的 R2V 调用；音频/视频输入、对话式视频编辑、首尾帧等能力暂未在本项目中接入。
 > `duration` 支持 `4` / `6` / `8` / `10`，非法值会回退到默认 `4` 秒。
 
 ```bash
