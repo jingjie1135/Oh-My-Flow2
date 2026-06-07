@@ -58,12 +58,16 @@ h1 { text-align: center; margin-bottom: 8px; font-size: 24px; color: #7c8aff; }
 
 .form-group { margin-bottom: 14px; }
 .form-group label { display: block; font-size: 13px; color: #888; margin-bottom: 6px; }
-.form-group textarea {
+.form-group textarea, .form-group select {
   width: 100%; background: #0f1117; border: 1px solid #2a2b3a; color: #e1e1e6;
   padding: 10px 12px; border-radius: 8px; font-size: 14px; resize: vertical; min-height: 80px;
   font-family: inherit;
 }
-.form-group textarea:focus { outline: none; border-color: #7c8aff; }
+.form-group select { min-height: 40px; resize: none; }
+.form-group textarea:focus, .form-group select:focus { outline: none; border-color: #7c8aff; }
+.param-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.param-grid .form-group { margin-bottom: 0; }
+.param-hint { color: #666; font-size: 12px; margin-top: 8px; line-height: 1.5; }
 
 .image-upload-area {
   border: 2px dashed #2a2b3a; border-radius: 8px; padding: 20px; text-align: center;
@@ -118,6 +122,7 @@ h1 { text-align: center; margin-bottom: 8px; font-size: 24px; color: #7c8aff; }
   .main-layout { flex-direction: column; }
   .sidebar { width: 100%; }
   .config-bar { flex-wrap: wrap; }
+  .param-grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -146,6 +151,28 @@ h1 { text-align: center; margin-bottom: 8px; font-size: 24px; color: #7c8aff; }
           <textarea id="promptInput" placeholder="描述你想生成的内容...">一只可爱的橘猫趴在窗台上晒太阳，窗外是樱花盛开的春天</textarea>
         </div>
 
+        <div id="parameterGroup" style="display:none; margin-bottom:14px;">
+          <div class="param-grid">
+            <div class="form-group" id="aspectParam">
+              <label>宽高比</label>
+              <select id="aspectSelect"></select>
+            </div>
+            <div class="form-group" id="durationParam">
+              <label>时长</label>
+              <select id="durationSelect"></select>
+            </div>
+            <div class="form-group" id="imageSizeParam">
+              <label>图片清晰度</label>
+              <select id="imageSizeSelect"></select>
+            </div>
+            <div class="form-group" id="resolutionParam">
+              <label>视频输出</label>
+              <select id="resolutionSelect"></select>
+            </div>
+          </div>
+          <div class="param-hint" id="parameterHint"></div>
+        </div>
+
         <div class="form-group" id="imageUploadGroup" style="display:none;">
           <label>上传图片 <span id="imageLimit" style="color:#666;font-size:12px;"></span></label>
           <div class="image-upload-area" id="imageUploadArea">
@@ -169,87 +196,98 @@ h1 { text-align: center; margin-bottom: 8px; font-size: 24px; color: #7c8aff; }
 
 <script>
 const STATE = { selectedModel: null, modelConfig: null, images: [], generating: false };
-</script>
-<script>
-// Model categories for sidebar
-const MODEL_CATEGORIES = {
-  "Gemini 3.1 Flash 图片": { filter: m => m.startsWith("gemini-3.1-flash-image") },
-  "Gemini 3.0 Pro 图片": { filter: m => m.startsWith("gemini-3.0-pro-image") },
-  "Imagen 4.0 图片": { filter: m => m.startsWith("imagen-4.0") },
-  "Veo 3.1 文生视频 (T2V)": { filter: m => m.startsWith("veo_3_1_t2v") && !m.includes("4k") && !m.includes("1080p") },
-  "Veo 3.1 图生视频 (I2V)": { filter: m => m.startsWith("veo_3_1_i2v") && !m.includes("4k") && !m.includes("1080p") },
-  "Veo 3.1 多图视频 (R2V)": { filter: m => m.startsWith("veo_3_1_r2v") && !m.includes("4k") && !m.includes("1080p") },
-  "视频放大 (Upsample)": { filter: m => m.includes("4k") || m.includes("1080p") },
+
+const ASPECT_LABELS = {
+  landscape: "16:9 横屏",
+  portrait: "9:16 竖屏",
+  square: "1:1 方图",
+  "four-three": "4:3 横图",
+  "three-four": "3:4 竖图",
 };
 
-const FALLBACK_MODELS = {
-  "gemini-3.1-flash-image": "Image generation (alias) - aspects: landscape, portrait, square, four-three, three-four; sizes: 2k, 4k",
-  "gemini-3.0-pro-image": "Image generation (alias) - aspects: landscape, portrait, square, four-three, three-four; sizes: 2k, 4k",
-  "imagen-4.0-generate-preview": "Image generation (alias) - aspects: landscape, portrait",
-  "veo_3_1_t2v_fast": "Video generation (alias) - supports landscape/portrait via generationConfig",
-  "veo_3_1_t2v_fast_4s": "Video generation (alias) - 4s, supports landscape/portrait via generationConfig",
-  "veo_3_1_t2v_fast_landscape_4s": "Video generation - fast 4s landscape",
-  "veo_3_1_t2v_fast_6s": "Video generation (alias) - 6s, supports landscape/portrait via generationConfig",
-  "veo_3_1_t2v_fast_landscape_6s": "Video generation - fast 6s landscape",
-  "veo_3_1_t2v_fast_ultra": "Video generation (alias) - supports landscape/portrait via generationConfig",
-  "veo_3_1_t2v_fast_ultra_relaxed": "Video generation (alias) - supports landscape/portrait via generationConfig",
-  "veo_3_1_t2v": "Video generation (alias) - supports landscape/portrait via generationConfig",
-  "veo_3_1_t2v_4s": "Video generation (alias) - 4s, supports landscape/portrait via generationConfig",
-  "veo_3_1_t2v_landscape_4s": "Video generation - quality 4s landscape",
-  "veo_3_1_t2v_6s": "Video generation (alias) - 6s, supports landscape/portrait via generationConfig",
-  "veo_3_1_t2v_landscape_6s": "Video generation - quality 6s landscape",
-  "veo_3_1_t2v_4k": "Video upsample alias - generate then upscale to 4K",
-  "veo_3_1_t2v_landscape_4k": "Video upsample alias - generate landscape then upscale to 4K",
-  "veo_3_1_t2v_1080p": "Video upsample alias - generate then upscale to 1080P",
-  "veo_3_1_t2v_landscape_1080p": "Video upsample alias - generate landscape then upscale to 1080P",
-  "veo_3_1_t2v_4s_4k": "Video upsample alias - generate 4s then upscale to 4K",
-  "veo_3_1_t2v_landscape_4s_4k": "Video upsample alias - generate 4s landscape then upscale to 4K",
-  "veo_3_1_t2v_4s_1080p": "Video upsample alias - generate 4s then upscale to 1080P",
-  "veo_3_1_t2v_landscape_4s_1080p": "Video upsample alias - generate 4s landscape then upscale to 1080P",
-  "veo_3_1_t2v_6s_4k": "Video upsample alias - generate 6s then upscale to 4K",
-  "veo_3_1_t2v_landscape_6s_4k": "Video upsample alias - generate 6s landscape then upscale to 4K",
-  "veo_3_1_t2v_6s_1080p": "Video upsample alias - generate 6s then upscale to 1080P",
-  "veo_3_1_t2v_landscape_6s_1080p": "Video upsample alias - generate 6s landscape then upscale to 1080P",
-  "veo_3_1_i2v_s_fast_fl": "Video generation (alias) - supports landscape/portrait via generationConfig",
-  "veo_3_1_i2v_s_fast_4s_fl": "Video generation (alias) - 4s, supports landscape/portrait via generationConfig",
-  "veo_3_1_i2v_s_fast_landscape_4s_fl": "Video generation - fast 4s landscape",
-  "veo_3_1_i2v_s_fast_6s_fl": "Video generation (alias) - 6s, supports landscape/portrait via generationConfig",
-  "veo_3_1_i2v_s_fast_landscape_6s_fl": "Video generation - fast 6s landscape",
-  "veo_3_1_i2v_s_fast_ultra_fl": "Video generation (alias) - supports landscape/portrait via generationConfig",
-  "veo_3_1_i2v_s_fast_ultra_relaxed": "Video generation (alias) - supports landscape/portrait via generationConfig",
-  "veo_3_1_i2v_s": "Video generation (alias) - supports landscape/portrait via generationConfig",
-  "veo_3_1_i2v_s_4s": "Video generation (alias) - 4s, supports landscape/portrait via generationConfig",
-  "veo_3_1_i2v_s_landscape_4s": "Video generation - quality 4s landscape",
-  "veo_3_1_i2v_s_6s": "Video generation (alias) - 6s, supports landscape/portrait via generationConfig",
-  "veo_3_1_i2v_s_landscape_6s": "Video generation - quality 6s landscape",
-  "veo_3_1_i2v_s_4k": "Video upsample alias - generate then upscale to 4K",
-  "veo_3_1_i2v_s_landscape_4k": "Video upsample alias - generate landscape then upscale to 4K",
-  "veo_3_1_i2v_s_1080p": "Video upsample alias - generate then upscale to 1080P",
-  "veo_3_1_i2v_s_landscape_1080p": "Video upsample alias - generate landscape then upscale to 1080P",
-  "veo_3_1_i2v_s_4s_4k": "Video upsample alias - generate 4s then upscale to 4K",
-  "veo_3_1_i2v_s_landscape_4s_4k": "Video upsample alias - generate 4s landscape then upscale to 4K",
-  "veo_3_1_i2v_s_4s_1080p": "Video upsample alias - generate 4s then upscale to 1080P",
-  "veo_3_1_i2v_s_landscape_4s_1080p": "Video upsample alias - generate 4s landscape then upscale to 1080P",
-  "veo_3_1_i2v_s_6s_4k": "Video upsample alias - generate 6s then upscale to 4K",
-  "veo_3_1_i2v_s_landscape_6s_4k": "Video upsample alias - generate 6s landscape then upscale to 4K",
-  "veo_3_1_i2v_s_6s_1080p": "Video upsample alias - generate 6s then upscale to 1080P",
-  "veo_3_1_i2v_s_landscape_6s_1080p": "Video upsample alias - generate 6s landscape then upscale to 1080P",
-  "veo_3_1_r2v_fast": "Video generation (alias) - supports landscape/portrait via generationConfig",
-  "veo_3_1_r2v_fast_landscape": "Video generation - R2V fast landscape",
-  "veo_3_1_r2v_fast_ultra": "Video generation (alias) - supports landscape/portrait via generationConfig",
-  "veo_3_1_r2v_fast_landscape_ultra": "Video generation - R2V fast ultra landscape",
-  "veo_3_1_r2v_fast_ultra_relaxed": "Video generation (alias) - supports landscape/portrait via generationConfig",
-  "veo_3_1_r2v_fast_landscape_ultra_relaxed": "Video generation - R2V fast ultra relaxed landscape",
-  "veo_3_1_r2v_fast_landscape_ultra_4k": "Video upsample alias - generate R2V landscape then upscale to 4K",
-  "veo_3_1_r2v_fast_landscape_ultra_1080p": "Video upsample alias - generate R2V landscape then upscale to 1080P",
-};
+const MODEL_CATEGORIES = [
+  { name: "参数自动选择 Alias", filter: item => item.is_alias },
+  { name: "Gemini Omni Flash R2V", filter: item => item.id.startsWith("gemini-omni-flash") },
+  { name: "Gemini 3.1 Flash 图片", filter: item => item.id.startsWith("gemini-3.1-flash-image") },
+  { name: "Gemini 3.0 Pro 图片", filter: item => item.id.startsWith("gemini-3.0-pro-image") },
+  { name: "Imagen 4.0 图片", filter: item => item.id.startsWith("imagen-4.0") },
+  { name: "Veo 3.1 文生视频 (T2V)", filter: item => item.video_type === "t2v" && !hasUpsample(item) },
+  { name: "Veo 3.1 图生视频 (I2V)", filter: item => item.video_type === "i2v" && !item.id.includes("interpolation") && !hasUpsample(item) },
+  { name: "Veo 3.1 插帧视频", filter: item => item.id.includes("interpolation") && !hasUpsample(item) },
+  { name: "Veo 3.1 多图视频 (R2V)", filter: item => item.video_type === "r2v" && !item.id.startsWith("gemini-omni-flash") && !hasUpsample(item) },
+  { name: "Veo 3.1 视频续写", filter: item => item.video_type === "extend" },
+  { name: "视频放大 (Upsample)", filter: item => hasUpsample(item) },
+  { name: "其他模型", filter: () => true },
+];
+
+function fallbackItem(id, description, meta) {
+  return {
+    id,
+    description,
+    is_alias: Boolean(meta.is_alias),
+    type: meta.type || "video",
+    video_type: meta.video_type,
+    supports_images: Boolean(meta.supports_images),
+    min_images: meta.min_images ?? null,
+    max_images: meta.max_images ?? null,
+    aspects: meta.aspects || [],
+    durations: meta.durations || [],
+    sizes: meta.sizes || [],
+    resolutions: meta.resolutions || [],
+    requires_video_id: Boolean(meta.requires_video_id),
+  };
+}
+
+const FALLBACK_MODELS = [
+  fallbackItem("gemini-3.1-flash-image", "Image generation (alias) - aspects and sizes via generationConfig", { type: "image", is_alias: true, supports_images: true, min_images: 0, max_images: 5, aspects: ["landscape", "portrait", "square", "four-three", "three-four"], sizes: ["2k", "4k"] }),
+  fallbackItem("gemini-3.0-pro-image", "Image generation (alias) - aspects and sizes via generationConfig", { type: "image", is_alias: true, supports_images: true, min_images: 0, max_images: 5, aspects: ["landscape", "portrait", "square", "four-three", "three-four"], sizes: ["2k", "4k"] }),
+  fallbackItem("imagen-4.0-generate-preview", "Image generation (alias) - landscape/portrait", { type: "image", is_alias: true, supports_images: true, min_images: 0, max_images: 5, aspects: ["landscape", "portrait"] }),
+  fallbackItem("gemini-omni-flash", "Video generation (alias) - Omni Flash R2V with duration/aspect", { type: "video", video_type: "r2v", is_alias: true, supports_images: true, min_images: 1, max_images: 3, aspects: ["landscape", "portrait"], durations: [4, 6, 8, 10] }),
+  fallbackItem("veo_3_1_t2v", "Video generation (alias) - quality T2V", { type: "video", video_type: "t2v", is_alias: true, aspects: ["landscape", "portrait"], durations: [4, 6], resolutions: ["1080p", "4k"] }),
+  fallbackItem("veo_3_1_t2v_fast", "Video generation (alias) - fast T2V", { type: "video", video_type: "t2v", is_alias: true, aspects: ["landscape", "portrait"], durations: [4, 6], resolutions: ["1080p", "4k"] }),
+  fallbackItem("veo_3_1_i2v_s", "Video generation (alias) - quality I2V", { type: "video", video_type: "i2v", is_alias: true, supports_images: true, min_images: 1, max_images: 2, aspects: ["landscape", "portrait"], durations: [4, 6], resolutions: ["1080p", "4k"] }),
+  fallbackItem("veo_3_1_i2v_lite", "Video generation (alias) - lite I2V", { type: "video", video_type: "i2v", is_alias: true, supports_images: true, min_images: 1, max_images: 1, aspects: ["landscape", "portrait"], durations: [4, 6] }),
+  fallbackItem("veo_3_1_interpolation_lite", "Video generation (alias) - interpolation lite", { type: "video", video_type: "i2v", is_alias: true, supports_images: true, min_images: 2, max_images: 2, aspects: ["landscape", "portrait"], durations: [4, 6] }),
+  fallbackItem("veo_3_1_r2v_fast", "Video generation (alias) - R2V fast", { type: "video", video_type: "r2v", is_alias: true, supports_images: true, min_images: 0, max_images: 3, aspects: ["landscape", "portrait"] }),
+  fallbackItem("veo_3_1_r2v_fast_ultra", "Video generation (alias) - R2V ultra", { type: "video", video_type: "r2v", is_alias: true, supports_images: true, min_images: 0, max_images: 3, aspects: ["landscape", "portrait"], resolutions: ["1080p", "4k"] }),
+  fallbackItem("veo_3_1_extend", "Video generation (alias) - extend generated video", { type: "video", video_type: "extend", is_alias: true, requires_video_id: true, aspects: ["landscape", "portrait"] }),
+];
 
 let ALL_MODELS = {};
 
 function applyFallbackModels(reason) {
   console.warn("使用内置候选模型列表:", reason);
-  ALL_MODELS = { ...FALLBACK_MODELS };
+  ALL_MODELS = {};
+  FALLBACK_MODELS.forEach(item => { ALL_MODELS[item.id] = item; });
   renderSidebar();
+}
+
+function hasUpsample(item) {
+  return Boolean(item.upsample) || item.id.includes("4k") || item.id.includes("1080p");
+}
+
+function normalizeModelItem(item) {
+  const id = item.id || item.name || "";
+  const isImage = item.type === "image" || id.includes("image") || id.startsWith("imagen");
+  return {
+    id,
+    description: item.description || "",
+    is_alias: Boolean(item.is_alias),
+    type: item.type || (isImage ? "image" : "video"),
+    video_type: item.video_type || null,
+    model_key: item.model_key || null,
+    aspect_ratio: item.aspect_ratio || null,
+    supports_images: Boolean(item.supports_images ?? isImage),
+    min_images: item.min_images ?? (isImage ? 0 : null),
+    max_images: item.max_images ?? (isImage ? 5 : null),
+    aspects: item.aspects || [],
+    durations: item.durations || [],
+    sizes: item.sizes || [],
+    resolutions: item.resolutions || [],
+    upsample: item.upsample || null,
+    requires_video_id: Boolean(item.requires_video_id),
+    default_model: item.default_model || null,
+  };
 }
 
 async function loadModels() {
@@ -273,7 +311,27 @@ async function loadModels() {
       return;
     }
     ALL_MODELS = {};
-    items.forEach(m => { ALL_MODELS[m.id] = m.description; });
+    items.forEach(m => {
+      const item = normalizeModelItem(m);
+      ALL_MODELS[item.id] = item;
+    });
+
+    try {
+      const aliasResp = await fetch(`${baseUrl}/v1/models/aliases`, {
+        headers: { "Authorization": `Bearer ${apiKey}` }
+      });
+      if (aliasResp.ok) {
+        const aliasData = await aliasResp.json();
+        const aliases = Array.isArray(aliasData.data) ? aliasData.data : [];
+        aliases.forEach(m => {
+          const item = normalizeModelItem(m);
+          ALL_MODELS[item.id] = item;
+        });
+      }
+    } catch (e) {
+      console.warn("加载别名模型失败，仅显示具体模型:", e);
+    }
+
     renderSidebar();
   } catch (e) {
     console.error("加载模型失败:", e);
@@ -286,56 +344,61 @@ function renderSidebarFallback() {
 }
 
 function getModelType(modelId) {
+  const item = ALL_MODELS[modelId];
+  if (item && item.type) return item.type;
   if (modelId.includes("image") || modelId.startsWith("imagen")) return "image";
   return "video";
 }
 
 function getModelMeta(modelId) {
-  // Determine supports_images, min/max from model name patterns
-  const isI2V = modelId.includes("i2v");
-  const isR2V = modelId.includes("r2v");
-  const isT2V = modelId.includes("t2v");
-  const isImage = getModelType(modelId) === "image";
-
-  if (isImage) return { type: "image", supportsImages: true, minImages: 0, maxImages: 5 };
-  if (isI2V) return { type: "video", supportsImages: true, minImages: 1, maxImages: 2 };
-  if (isR2V) return { type: "video", supportsImages: true, minImages: 0, maxImages: 3 };
-  return { type: "video", supportsImages: false, minImages: 0, maxImages: 0 };
+  const item = ALL_MODELS[modelId] || normalizeModelItem({ id: modelId });
+  return {
+    ...item,
+    supportsImages: Boolean(item.supports_images),
+    minImages: item.min_images ?? 0,
+    maxImages: item.max_images ?? 0,
+  };
 }
 
 function renderSidebar() {
   const sidebar = document.getElementById("modelSidebar");
   sidebar.innerHTML = "";
 
-  const modelIds = Object.keys(ALL_MODELS).sort();
-  if (modelIds.length === 0) {
+  const models = Object.values(ALL_MODELS).sort((a, b) => a.id.localeCompare(b.id));
+  if (models.length === 0) {
     sidebar.innerHTML = '<div class="model-section"><div class="model-list" style="border-radius:8px;"><div class="model-item" style="cursor:default;color:#888;">未获取到可用模型，请检查 API Key 或稍后重试</div></div></div>';
     return;
   }
 
-  for (const [catName, catDef] of Object.entries(MODEL_CATEGORIES)) {
-    const models = modelIds.filter(catDef.filter);
-    if (models.length === 0) continue;
+  const rendered = new Set();
+  MODEL_CATEGORIES.forEach(catDef => {
+    const sectionModels = models.filter(item => !rendered.has(item.id) && catDef.filter(item));
+    if (sectionModels.length === 0) return;
+    sectionModels.forEach(item => rendered.add(item.id));
 
     const section = document.createElement("div");
     section.className = "model-section";
 
     const title = document.createElement("div");
     title.className = "section-title";
-    title.innerHTML = `<span>${catName} (${models.length})</span><span class="arrow">▼</span>`;
+    title.innerHTML = `<span>${catDef.name} (${sectionModels.length})</span><span class="arrow">▼</span>`;
 
     const list = document.createElement("div");
     list.className = "model-list";
 
-    models.forEach(modelId => {
+    sectionModels.forEach(model => {
       const item = document.createElement("div");
       item.className = "model-item";
-      item.dataset.model = modelId;
+      item.dataset.model = model.id;
 
-      const type = getModelType(modelId);
-      const shortName = modelId.replace("gemini-3.1-flash-image-", "").replace("gemini-3.0-pro-image-", "").replace("imagen-4.0-generate-preview-", "");
-      item.innerHTML = `<span>${shortName}</span><span class="model-tag ${type === 'image' ? 'tag-image' : 'tag-video'}">${type === 'image' ? '图片' : '视频'}</span>`;
-      item.onclick = () => selectModel(modelId);
+      const type = getModelType(model.id);
+      const shortName = model.id
+        .replace("gemini-3.1-flash-image-", "")
+        .replace("gemini-3.0-pro-image-", "")
+        .replace("imagen-4.0-generate-preview-", "");
+      const tag = model.is_alias ? "Alias" : (type === "image" ? "图片" : "视频");
+      item.innerHTML = `<span>${shortName}</span><span class="model-tag ${type === 'image' ? 'tag-image' : 'tag-video'}">${tag}</span>`;
+      item.onclick = () => selectModel(model.id);
       list.appendChild(item);
     });
 
@@ -347,7 +410,53 @@ function renderSidebar() {
     section.appendChild(title);
     section.appendChild(list);
     sidebar.appendChild(section);
+  });
+}
+
+function setSelectOptions(selectId, values, labels, includeDefault) {
+  const select = document.getElementById(selectId);
+  select.innerHTML = "";
+  if (includeDefault) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "默认";
+    select.appendChild(option);
   }
+  values.forEach(value => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = labels[value] || value;
+    select.appendChild(option);
+  });
+}
+
+function toggleParam(id, visible) {
+  document.getElementById(id).style.display = visible ? "block" : "none";
+}
+
+function updateParameterControls(meta) {
+  const group = document.getElementById("parameterGroup");
+  const showAliasControls = Boolean(meta.is_alias);
+  const aspects = meta.aspects || [];
+  const durations = meta.durations || [];
+  const sizes = meta.sizes || [];
+  const resolutions = meta.resolutions || [];
+
+  toggleParam("aspectParam", showAliasControls && aspects.length > 0);
+  toggleParam("durationParam", showAliasControls && durations.length > 0);
+  toggleParam("imageSizeParam", showAliasControls && meta.type === "image" && sizes.length > 0);
+  toggleParam("resolutionParam", showAliasControls && meta.type === "video" && resolutions.length > 0);
+
+  if (showAliasControls && aspects.length) setSelectOptions("aspectSelect", aspects, ASPECT_LABELS, true);
+  if (showAliasControls && durations.length) setSelectOptions("durationSelect", durations.map(String), {}, true);
+  if (showAliasControls && sizes.length) setSelectOptions("imageSizeSelect", sizes, {}, true);
+  if (showAliasControls && resolutions.length) setSelectOptions("resolutionSelect", resolutions, { "1080p": "1080P", "4k": "4K" }, true);
+
+  const visible = showAliasControls && (aspects.length || durations.length || sizes.length || resolutions.length);
+  group.style.display = visible ? "block" : "none";
+  document.getElementById("parameterHint").textContent = visible
+    ? "选择 alias 时，这些参数会随请求发送到 generationConfig，由服务端解析到具体模型变体。"
+    : "";
 }
 
 function selectModel(modelId) {
@@ -362,7 +471,8 @@ function selectModel(modelId) {
 
   // Update panel
   document.getElementById("selectedModelName").textContent = modelId;
-  document.getElementById("selectedModelInfo").textContent = ALL_MODELS[modelId] || "";
+  document.getElementById("selectedModelInfo").textContent = STATE.modelConfig.description || "";
+  updateParameterControls(STATE.modelConfig);
 
   // Show/hide image upload
   const uploadGroup = document.getElementById("imageUploadGroup");
@@ -438,6 +548,27 @@ function removeImage(idx) {
   renderImagePreviews();
 }
 
+function buildGenerationConfig() {
+  const meta = STATE.modelConfig || {};
+  if (!meta.is_alias) return null;
+
+  const generationConfig = {};
+  const aspect = document.getElementById("aspectSelect").value;
+  const duration = document.getElementById("durationSelect").value;
+  const imageSize = document.getElementById("imageSizeSelect").value;
+  const resolution = document.getElementById("resolutionSelect").value;
+
+  if (aspect) generationConfig.aspectRatio = aspect;
+  if (duration) generationConfig.duration = Number(duration);
+  if (meta.type === "image" && imageSize) {
+    generationConfig.imageConfig = { imageSize };
+    if (aspect) generationConfig.imageConfig.aspectRatio = aspect;
+  }
+  if (meta.type === "video" && resolution) generationConfig.resolution = resolution;
+
+  return Object.keys(generationConfig).length ? generationConfig : null;
+}
+
 // Generation
 document.getElementById("btnGenerate").onclick = generate;
 
@@ -450,6 +581,15 @@ async function generate() {
   if (!prompt) { alert("请输入提示词"); return; }
   if (!apiKey) { alert("请输入 API Key"); return; }
   if (!baseUrl) { alert("请输入服务地址"); return; }
+  const meta = STATE.modelConfig || {};
+  if (meta.requires_video_id) {
+    alert("当前测试页暂不支持视频续写所需的源视频 ID，请使用 API 直接测试该模型。");
+    return;
+  }
+  if (STATE.images.length < (meta.minImages || 0)) {
+    alert(`当前模型至少需要 ${meta.minImages} 张图片`);
+    return;
+  }
 
   STATE.generating = true;
   const btn = document.getElementById("btnGenerate");
@@ -475,9 +615,12 @@ async function generate() {
   const messages = [{ role: "user", content: content.length === 1 ? prompt : content }];
 
   const body = { model: STATE.selectedModel, messages, stream: true };
+  const generationConfig = buildGenerationConfig();
+  if (generationConfig) body.generationConfig = generationConfig;
 
   const startTime = Date.now();
   appendLog(`[${new Date().toLocaleTimeString()}] 模型: ${STATE.selectedModel}\n`);
+  if (generationConfig) appendLog(`[${new Date().toLocaleTimeString()}] 参数: ${JSON.stringify(generationConfig)}\n`);
   appendLog(`[${new Date().toLocaleTimeString()}] 提示词: ${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}\n`);
   appendLog(`[${new Date().toLocaleTimeString()}] 开始请求...\n`);
 
